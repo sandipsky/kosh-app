@@ -1,6 +1,7 @@
 import { Card, Group, Table, Text } from '@mantine/core';
 import { useAppStore } from '../../store/useAppStore';
 import {
+  isContributingMember,
   memberStatus,
   memberTotal,
   totalContrib,
@@ -12,7 +13,7 @@ import { StatusBadge } from '../common/StatusBadge';
 
 export function MemberContributionsTable() {
   const data = useAppStore((s) => s.data);
-  const contribMembers = data.members.filter((m) => m.role !== 'admin');
+  const contribMembers = data.members.filter(isContributingMember);
   const tc = totalContrib(data);
   const tf = totalFund(data);
 

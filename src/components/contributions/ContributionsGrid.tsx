@@ -1,6 +1,6 @@
 import { Card, Group, Text } from '@mantine/core';
 import { useMemo } from 'react';
-import { sortByMonth } from '../../constants/months';
+import { allKoshMonths, isContributingMember } from '../../lib/calculations';
 import { fmt } from '../../lib/formatters';
 import { useAppStore } from '../../store/useAppStore';
 import { MemberAvatar } from '../common/MemberAvatar';
@@ -9,14 +9,11 @@ export function ContributionsGrid() {
   const data = useAppStore((s) => s.data);
 
   const contribMembers = useMemo(
-    () => data.members.filter((m) => m.role !== 'admin'),
+    () => data.members.filter(isContributingMember),
     [data.members]
   );
 
-  const months = useMemo(
-    () => [...new Set(data.payments.map((p) => p.month))].sort(sortByMonth),
-    [data.payments]
-  );
+  const months = useMemo(() => allKoshMonths(), []);
 
   const grandTotalByMember = useMemo(
     () =>

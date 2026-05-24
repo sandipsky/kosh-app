@@ -2,7 +2,11 @@ import { Card, Text, useComputedColorScheme } from '@mantine/core';
 import ReactApexChart from 'react-apexcharts';
 import type { ApexOptions } from 'apexcharts';
 import { useAppStore } from '../../store/useAppStore';
-import { investmentCurrentValue, totalFund } from '../../lib/calculations';
+import {
+  cashInBank,
+  investmentCurrentValue,
+  totalFund,
+} from '../../lib/calculations';
 import { fmt } from '../../lib/formatters';
 
 export function FundBreakdownChart() {
@@ -11,7 +15,7 @@ export function FundBreakdownChart() {
   const scheme = useComputedColorScheme('light', { getInitialValueInEffect: true });
   const isDark = scheme === 'dark';
 
-  const series: number[] = [data.cashInBank, ...data.investments.map(investmentCurrentValue)];
+  const series: number[] = [cashInBank(data), ...data.investments.map(investmentCurrentValue)];
   const labels: string[] = ['Cash in bank', ...data.investments.map((i) => i.name)];
 
   const labelColor = isDark ? '#C9CCD3' : '#495057';

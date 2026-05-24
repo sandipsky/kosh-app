@@ -14,8 +14,8 @@ import { notifications } from '@mantine/notifications';
 import { useEffect } from 'react';
 import {
   BS_YEARS,
-  CURRENT_NEPALI_MONTH,
-  CURRENT_NEPALI_YEAR,
+  currentNepaliMonth,
+  currentNepaliYear,
   NEPALI_MONTHS,
 } from '../../constants/months';
 import { fmt } from '../../lib/formatters';
@@ -50,7 +50,7 @@ const STATUS_OPTIONS = ['Applied', 'Allotted', 'Active', 'Matured', 'Sold'];
 function splitMonthYear(value: string): { month: string; year: string } {
   const [m, y] = value.split(' ');
   if (m && y) return { month: m, year: y };
-  return { month: CURRENT_NEPALI_MONTH, year: String(CURRENT_NEPALI_YEAR) };
+  return { month: currentNepaliMonth(), year: String(currentNepaliYear()) };
 }
 
 export function InvestmentFormModal({ opened, onClose, editing }: Props) {
@@ -62,10 +62,10 @@ export function InvestmentFormModal({ opened, onClose, editing }: Props) {
       description: '',
       type: 'Local IPO',
       manager: '',
-      buyMonth: CURRENT_NEPALI_MONTH,
-      buyYear: String(CURRENT_NEPALI_YEAR),
-      maturityMonth: CURRENT_NEPALI_MONTH,
-      maturityYear: String(CURRENT_NEPALI_YEAR + 1),
+      buyMonth: currentNepaliMonth(),
+      buyYear: String(currentNepaliYear()),
+      maturityMonth: currentNepaliMonth(),
+      maturityYear: String(currentNepaliYear() + 1),
       buyRate: 100,
       currentRate: 100,
       units: 1,

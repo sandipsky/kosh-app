@@ -13,6 +13,7 @@ import { IconPlus, IconTrash } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { canManagePayments } from '../../lib/permissions';
+import { MONTHS_ORDER } from '../../constants/months';
 import { findMember } from '../../lib/calculations';
 import { fmt, formatDate } from '../../lib/formatters';
 import { useAppStore } from '../../store/useAppStore';
@@ -34,10 +35,12 @@ export function PaymentsList() {
 
   const sorted = useMemo(
     () =>
-      [...data.payments].sort(
-        (a, b) =>
-          new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime()
-      ),
+      [...data.payments].sort((a, b) => {
+        const dateDiff =
+          new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime();
+        if (dateDiff !== 0) return dateDiff;
+        return MONTHS_ORDER.indexOf(b.month) - MONTHS_ORDER.indexOf(a.month);
+      }),
     [data.payments]
   );
 

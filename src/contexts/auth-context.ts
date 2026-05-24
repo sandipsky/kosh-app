@@ -3,10 +3,10 @@ import type { Member } from '../types';
 
 export interface AuthContextValue {
   currentUser: Member | null;
-  login: (username: string, password: string) => string | null;
-  logout: () => void;
+  authReady: boolean;
+  login: (email: string, password: string) => Promise<string | null>;
+  logout: () => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<string | null>;
 }
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
-
-export const AUTH_KEY = 'pfnk-current-user';

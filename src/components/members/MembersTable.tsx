@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { canManageMembers } from '../../lib/permissions';
 import {
+  isContributingMember,
   memberDue,
   memberStatus,
   memberTotal,
@@ -31,6 +32,8 @@ export function MembersTable() {
 
   const data = useAppStore((s) => s.data);
   const deleteMember = useAppStore((s) => s.deleteMember);
+
+  const visibleMembers = data.members.filter(isContributingMember);
 
   const [opened, setOpened] = useState(false);
   const [editing, setEditing] = useState<Member | null>(null);
@@ -69,7 +72,7 @@ export function MembersTable() {
               Members
             </Text>
             <Text size="xs" c="dimmed">
-              {data.members.length} total · Rs {data.monthlyContribution.toLocaleString()} / month
+              {visibleMembers.length} total · Rs {data.monthlyContribution.toLocaleString()} / month
             </Text>
           </div>
           {canEdit && (
@@ -103,7 +106,7 @@ export function MembersTable() {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {data.members.map((m, i) => (
+              {visibleMembers.map((m, i) => (
                 <Table.Tr key={m.id}>
                   <Table.Td>
                     <Text size="sm" c="dimmed">
@@ -150,13 +153,7 @@ export function MembersTable() {
                     </Text>
                   </Table.Td>
                   <Table.Td>
-                    {m.role === 'admin' ? (
-                      <Text size="xs" c="dimmed">
-                        —
-                      </Text>
-                    ) : (
-                      <StatusBadge status={memberStatus(data, m.id)} />
-                    )}
+                    <StatusBadge status={memberStatus(data, m.id)} />
                   </Table.Td>
                   <Table.Td>
                     <RoleBadge role={m.role} />

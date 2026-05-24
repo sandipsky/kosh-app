@@ -10,6 +10,7 @@ import {
 import type { ReactNode } from 'react';
 import { fmt, pct } from '../../lib/formatters';
 import {
+  cashInBank,
   pendingDues,
   totalFund,
   totalInvestmentsInvested,
@@ -41,7 +42,7 @@ export function KpiGrid() {
     },
     {
       label: 'Cash in bank',
-      value: fmt(data.cashInBank),
+      value: fmt(cashInBank(data)),
       color: 'blue',
       icon: IconCash,
     },

@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/members/$(request.auth.uid)).data;
+    }
+    function hasProfile() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/members/$(request.auth.uid));
+    }
+    function isAdmin() {
+      return hasProfile() && userDoc().role == 'admin';
+    }
+    function isAdminOrTreasurer() {
+      return hasProfile() && userDoc().role in ['admin', 'treasurer'];
+    }
+    // One-time bootstrap: this email may self-create their own admin profile
+    // on first login. After that, only an existing admin can add members.
+    // Change or remove once you have at least one admin in Firestore.
+    function isBootstrapAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'admin@admin.com';
+    }
+
+    match /members/{userId} {
+      allow read: if true;
+      allow create: if isAdmin()
+        || (isBootstrapAdmin()
+            && request.auth.uid == userId
+            && request.resource.data.role == 'admin');
+      allow update, delete: if isAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if true;
+      allow write: if isAdminOrTreasurer();
+    }
+
+    match /investments/{investmentId} {
+      allow read: if true;
+      allow write: if isAdminOrTreasurer();
+    }
+
+    match /config/{configId} {
+      allow read: if true;
+      allow create: if isBootstrapAdmin() || isAdminOrTreasurer();
+      allow update: if isAdminOrTreasurer();
+      allow delete: if isAdmin();
+    }
+  }
+}

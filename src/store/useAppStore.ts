@@ -1,17 +1,18 @@
 import { create } from 'zustand';
 import { v4 as uuid } from 'uuid';
+import type { Unsubscribe } from 'firebase/firestore';
 import type { AppData, Investment, Member, Payment } from '../types';
-import { SEED_DATA } from '../constants/seed';
 import { storage } from '../lib/storage';
 
 interface AppState {
   data: AppData;
   hydrated: boolean;
   saving: boolean;
-  hydrate: () => Promise<void>;
-  resetToSeed: () => Promise<void>;
+  error: string | null;
 
-  upsertMember: (member: Omit<Member, 'id' | 'createdAt'> & { id?: string }) => Promise<Member>;
+  hydrate: () => Unsubscribe;
+
+  upsertMember: (member: Member) => Promise<void>;
   deleteMember: (id: string) => Promise<void>;
 
   addPayment: (payment: Omit<Payment, 'id'>) => Promise<Payment | null>;
@@ -28,72 +29,54 @@ interface AppState {
   setMonthlyContribution: (n: number) => Promise<void>;
 }
 
-const cloneSeed = (): AppData =>
-  JSON.parse(JSON.stringify(SEED_DATA)) as AppData;
+const EMPTY: AppData = {
+  members: [],
+  payments: [],
+  investments: [],
+  cashInBank: 0,
+  monthlyContribution: 2000,
+  lastUpdated: new Date().toISOString(),
+};
 
-async function persist(data: AppData): Promise<AppData> {
-  const stamped: AppData = { ...data, lastUpdated: new Date().toISOString() };
-  await storage.save(stamped);
-  return stamped;
+async function withSaving<T>(
+  set: (partial: Partial<AppState>) => void,
+  fn: () => Promise<T>
+): Promise<T> {
+  set({ saving: true, error: null });
+  try {
+    return await fn();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    set({ error: msg });
+    throw e;
+  } finally {
+    set({ saving: false });
+  }
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  data: cloneSeed(),
+  data: EMPTY,
   hydrated: false,
   saving: false,
+  error: null,
 
-  async hydrate() {
-    const loaded = await storage.load();
-    if (loaded) {
-      set({ data: loaded, hydrated: true });
-    } else {
-      const seeded = await persist(cloneSeed());
-      set({ data: seeded, hydrated: true });
-    }
-  },
-
-  async resetToSeed() {
-    const seeded = await persist(cloneSeed());
-    set({ data: seeded });
+  hydrate() {
+    return storage.subscribe((data) => {
+      set({ data, hydrated: true });
+    });
   },
 
   async upsertMember(member) {
-    const { data } = get();
-    set({ saving: true });
-    let result: Member;
-    let next: AppData;
-    if (member.id && data.members.some((m) => m.id === member.id)) {
-      result = {
-        ...(data.members.find((m) => m.id === member.id) as Member),
-        ...member,
-      } as Member;
-      next = {
-        ...data,
-        members: data.members.map((m) => (m.id === result.id ? result : m)),
-      };
-    } else {
-      result = {
-        ...(member as Omit<Member, 'id' | 'createdAt'>),
-        id: member.id ?? uuid(),
-        createdAt: new Date().toISOString(),
-      };
-      next = { ...data, members: [...data.members, result] };
-    }
-    const saved = await persist(next);
-    set({ data: saved, saving: false });
-    return result;
+    await withSaving(set, () => storage.saveMember(member));
   },
 
   async deleteMember(id) {
     const { data } = get();
-    set({ saving: true });
-    const next: AppData = {
-      ...data,
-      members: data.members.filter((m) => m.id !== id),
-      payments: data.payments.filter((p) => p.memberId !== id),
-    };
-    const saved = await persist(next);
-    set({ data: saved, saving: false });
+    await withSaving(set, async () => {
+      const memberPayments = data.payments.filter((p) => p.memberId === id);
+      await Promise.all(memberPayments.map((p) => storage.deletePayment(p.id)));
+      await storage.deleteMember(id);
+    });
   },
 
   async addPayment(payment) {
@@ -102,94 +85,48 @@ export const useAppStore = create<AppState>((set, get) => ({
       (p) => p.memberId === payment.memberId && p.month === payment.month
     );
     if (dup) return null;
-    set({ saving: true });
     const created: Payment = { ...payment, id: uuid() };
-    const next: AppData = { ...data, payments: [...data.payments, created] };
-    const saved = await persist(next);
-    set({ data: saved, saving: false });
+    await withSaving(set, () => storage.savePayment(created));
     return created;
   },
 
   async updatePayment(id, patch) {
     const { data } = get();
-    set({ saving: true });
-    const next: AppData = {
-      ...data,
-      payments: data.payments.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-    };
-    const saved = await persist(next);
-    set({ data: saved, saving: false });
+    const existing = data.payments.find((p) => p.id === id);
+    if (!existing) return;
+    const updated: Payment = { ...existing, ...patch, id };
+    await withSaving(set, () => storage.savePayment(updated));
   },
 
   async deletePayment(id) {
-    const { data } = get();
-    set({ saving: true });
-    const next: AppData = {
-      ...data,
-      payments: data.payments.filter((p) => p.id !== id),
-    };
-    const saved = await persist(next);
-    set({ data: saved, saving: false });
+    await withSaving(set, () => storage.deletePayment(id));
   },
 
   async upsertInvestment(inv) {
-    const { data } = get();
-    set({ saving: true });
-    let result: Investment;
-    let next: AppData;
-    if (inv.id && data.investments.some((i) => i.id === inv.id)) {
-      result = {
-        ...(data.investments.find((i) => i.id === inv.id) as Investment),
-        ...inv,
-      } as Investment;
-      next = {
-        ...data,
-        investments: data.investments.map((i) => (i.id === result.id ? result : i)),
-      };
-    } else {
-      result = { ...(inv as Omit<Investment, 'id'>), id: inv.id ?? uuid() };
-      next = { ...data, investments: [...data.investments, result] };
-    }
-    const saved = await persist(next);
-    set({ data: saved, saving: false });
+    const id = inv.id ?? uuid();
+    const result: Investment = { ...(inv as Omit<Investment, 'id'>), id };
+    await withSaving(set, () => storage.saveInvestment(result));
     return result;
   },
 
   async deleteInvestment(id) {
-    const { data } = get();
-    set({ saving: true });
-    const next: AppData = {
-      ...data,
-      investments: data.investments.filter((i) => i.id !== id),
-    };
-    const saved = await persist(next);
-    set({ data: saved, saving: false });
+    await withSaving(set, () => storage.deleteInvestment(id));
   },
 
   async setCashInBank(n) {
-    const { data } = get();
-    set({ saving: true });
-    const saved = await persist({ ...data, cashInBank: n });
-    set({ data: saved, saving: false });
+    await withSaving(set, () => storage.setCashInBank(n));
   },
 
   async setInvestmentRate(id, rate) {
     const { data } = get();
-    set({ saving: true });
-    const next: AppData = {
-      ...data,
-      investments: data.investments.map((i) =>
-        i.id === id ? { ...i, currentRate: rate } : i
-      ),
-    };
-    const saved = await persist(next);
-    set({ data: saved, saving: false });
+    const inv = data.investments.find((i) => i.id === id);
+    if (!inv) return;
+    await withSaving(set, () =>
+      storage.saveInvestment({ ...inv, currentRate: rate })
+    );
   },
 
   async setMonthlyContribution(n) {
-    const { data } = get();
-    set({ saving: true });
-    const saved = await persist({ ...data, monthlyContribution: n });
-    set({ data: saved, saving: false });
+    await withSaving(set, () => storage.setMonthlyContribution(n));
   },
 }));

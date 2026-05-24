@@ -4,7 +4,6 @@ import { FundBreakdownChart } from '../components/dashboard/FundBreakdownChart';
 import { KpiGrid } from '../components/dashboard/KpiGrid';
 import { MemberContributionsTable } from '../components/dashboard/MemberContributionsTable';
 import { RecentPaymentsTable } from '../components/dashboard/RecentPaymentsTable';
-import { UpdateFundValuesCard } from '../components/dashboard/UpdateFundValuesCard';
 
 export function DashboardPage() {
   return (
@@ -26,7 +25,6 @@ export function DashboardPage() {
           <MemberContributionsTable />
         </Grid.Col>
       </Grid>
-      <UpdateFundValuesCard />
     </Stack>
   );
 }

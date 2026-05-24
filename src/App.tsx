@@ -16,7 +16,8 @@ function App() {
   const hydrate = useAppStore((s) => s.hydrate);
 
   useEffect(() => {
-    hydrate();
+    const unsubscribe = hydrate();
+    return () => unsubscribe();
   }, [hydrate]);
 
   if (!hydrated) {

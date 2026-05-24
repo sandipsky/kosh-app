@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Group,
   Modal,
@@ -6,16 +7,24 @@ import {
   SegmentedControl,
   Select,
   Stack,
+  Text,
   TextInput,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { useEffect } from 'react';
+import { IconAlertCircle, IconCheck, IconMail } from '@tabler/icons-react';
+import {
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  signOut,
+} from 'firebase/auth';
+import { useEffect, useState } from 'react';
 import { GENDER_OPTIONS, ROLE_OPTIONS } from '../../constants/roles';
 import {
   initialsFrom,
   pickPaletteByIndex,
 } from '../../constants/avatarPalette';
+import { auth, secondaryAuth } from '../../lib/firebase';
 import type { Gender, Member, Role } from '../../types';
 import { useAppStore } from '../../store/useAppStore';
 
@@ -40,6 +49,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function MemberFormModal({ opened, onClose, editing }: Props) {
   const members = useAppStore((s) => s.data.members);
   const upsertMember = useAppStore((s) => s.upsertMember);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const form = useForm<FormValues>({
     initialValues: {
@@ -62,13 +73,15 @@ export function MemberFormModal({ opened, onClose, editing }: Props) {
         );
         return dup ? 'Username is already taken' : null;
       },
-      email: (v) => (EMAIL_RE.test(v) ? null : 'Enter a valid email'),
+      email: (v) => (EMAIL_RE.test(v.trim()) ? null : 'Enter a valid email'),
       password: (v) => {
-        if (editing && v.length === 0) return null;
+        if (editing) return null;
         return v.length < 6 ? 'Password must be at least 6 chars' : null;
       },
-      confirmPassword: (v, all) =>
-        v === all.password ? null : 'Passwords do not match',
+      confirmPassword: (v, all) => {
+        if (editing) return null;
+        return v === all.password ? null : 'Passwords do not match';
+      },
     },
   });
 
@@ -90,46 +103,101 @@ export function MemberFormModal({ opened, onClose, editing }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, editing?.id]);
 
+  async function handleSendReset() {
+    if (!editing) return;
+    try {
+      await sendPasswordResetEmail(auth, editing.email);
+      notifications.show({
+        title: 'Reset email sent',
+        message: `${editing.email} will receive a password-reset link.`,
+        color: 'teal',
+        icon: <IconCheck size={16} />,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+    }
+  }
+
   async function handleSubmit(values: FormValues) {
-    const paletteIdx = members.length;
-    const palette = editing
-      ? { bg: editing.color, fg: editing.fg }
-      : pickPaletteByIndex(paletteIdx);
-    const password =
-      editing && values.password.length === 0 ? editing.password : values.password;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const paletteIdx = members.length;
+      const palette = editing
+        ? { bg: editing.color, fg: editing.fg }
+        : pickPaletteByIndex(paletteIdx);
 
-    await upsertMember({
-      id: editing?.id,
-      name: values.name.trim(),
-      username: values.username.trim().toLowerCase(),
-      email: values.email.trim(),
-      gender: values.gender,
-      role: values.role,
-      password,
-      initials: initialsFrom(values.name),
-      color: palette.bg,
-      fg: palette.fg,
-    });
+      let id = editing?.id;
 
-    notifications.show({
-      title: editing ? 'Member updated' : 'Member added',
-      message: values.name,
-      color: 'teal',
-      autoClose: 2000,
-    });
-    onClose();
+      if (!editing) {
+        // Create Auth user on the secondary app so we don't lose admin's session.
+        const cred = await createUserWithEmailAndPassword(
+          secondaryAuth,
+          values.email.trim(),
+          values.password
+        );
+        id = cred.user.uid;
+        await signOut(secondaryAuth);
+      }
+
+      const member: Member = {
+        id: id as string,
+        name: values.name.trim(),
+        username: values.username.trim().toLowerCase(),
+        email: values.email.trim(),
+        gender: values.gender,
+        role: values.role,
+        initials: initialsFrom(values.name),
+        color: palette.bg,
+        fg: palette.fg,
+        createdAt: editing?.createdAt ?? new Date().toISOString(),
+      };
+
+      await upsertMember(member);
+
+      notifications.show({
+        title: editing ? 'Member updated' : 'Member added',
+        message: editing
+          ? values.name
+          : `${values.name} can now log in with ${values.email}.`,
+        color: 'teal',
+        icon: <IconCheck size={16} />,
+        autoClose: 3000,
+      });
+      onClose();
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code === 'auth/email-already-in-use') {
+        setError('That email is already registered.');
+      } else if (code === 'auth/weak-password') {
+        setError('Password must be at least 6 characters.');
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
     <Modal
       opened={opened}
-      onClose={onClose}
+      onClose={() => {
+        setError(null);
+        onClose();
+      }}
       title={editing ? `Edit ${editing.name}` : 'Add member'}
       centered
       size="md"
     >
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack gap="sm">
+          {error && (
+            <Alert color="red" icon={<IconAlertCircle size={16} />} variant="light">
+              {error}
+            </Alert>
+          )}
           <TextInput
             label="Full name"
             required
@@ -147,6 +215,12 @@ export function MemberFormModal({ opened, onClose, editing }: Props) {
               label="Email"
               required
               placeholder="anish@example.com"
+              type="email"
+              description={
+                editing
+                  ? 'Updates contact email only. Login email is unchanged.'
+                  : undefined
+              }
               {...form.getInputProps('email')}
             />
           </Group>
@@ -168,25 +242,43 @@ export function MemberFormModal({ opened, onClose, editing }: Props) {
               />
             </div>
           </Group>
-          <Group grow>
-            <PasswordInput
-              label={editing ? 'New password (optional)' : 'Password'}
-              placeholder="At least 6 characters"
-              autoComplete="new-password"
-              {...form.getInputProps('password')}
-            />
-            <PasswordInput
-              label="Confirm password"
-              placeholder="Re-enter password"
-              autoComplete="new-password"
-              {...form.getInputProps('confirmPassword')}
-            />
-          </Group>
+          {editing ? (
+            <Button
+              variant="default"
+              leftSection={<IconMail size={16} />}
+              onClick={handleSendReset}
+            >
+              Send password reset email
+            </Button>
+          ) : (
+            <Group grow>
+              <PasswordInput
+                label="Initial password"
+                placeholder="At least 6 characters"
+                autoComplete="new-password"
+                {...form.getInputProps('password')}
+              />
+              <PasswordInput
+                label="Confirm password"
+                placeholder="Re-enter password"
+                autoComplete="new-password"
+                {...form.getInputProps('confirmPassword')}
+              />
+            </Group>
+          )}
+          {!editing && (
+            <Text size="xs" c="dimmed">
+              Tell the new member their password — they can change it later via
+              "Forgot password?" on the login screen.
+            </Text>
+          )}
           <Group justify="flex-end" mt="xs">
             <Button variant="default" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit">{editing ? 'Save changes' : 'Add member'}</Button>
+            <Button type="submit" loading={submitting}>
+              {editing ? 'Save changes' : 'Add member'}
+            </Button>
           </Group>
         </Stack>
       </form>

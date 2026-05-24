@@ -12,12 +12,8 @@ import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconAlertCircle } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
-import {
-  BS_YEARS,
-  CURRENT_NEPALI_MONTH,
-  CURRENT_NEPALI_YEAR,
-  NEPALI_MONTHS,
-} from '../../constants/months';
+import { currentMonthLabel } from '../../constants/months';
+import { allPaymentMonths, isContributingMember } from '../../lib/calculations';
 import { useAppStore } from '../../store/useAppStore';
 
 interface Props {
@@ -27,8 +23,7 @@ interface Props {
 
 interface FormValues {
   memberId: string;
-  month: string;
-  year: string;
+  monthLabel: string; // "Ashoj 2082"
   amount: number;
   paymentDate: Date;
 }
@@ -39,19 +34,23 @@ export function PaymentFormModal({ opened, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const memberOptions = data.members
-    .filter((m) => m.role !== 'admin')
+    .filter(isContributingMember)
     .map((m) => ({ value: m.id, label: m.name }));
+
+  // Reverse so the most recent month is at the top of the dropdown.
+  const monthOptions = [...allPaymentMonths()].reverse();
 
   const form = useForm<FormValues>({
     initialValues: {
       memberId: memberOptions[0]?.value ?? '',
-      month: CURRENT_NEPALI_MONTH,
-      year: String(CURRENT_NEPALI_YEAR),
+      monthLabel: currentMonthLabel(),
       amount: data.monthlyContribution,
       paymentDate: new Date(),
     },
     validate: {
       memberId: (v) => (v ? null : 'Pick a member'),
+      monthLabel: (v) =>
+        monthOptions.includes(v) ? null : 'Pick a valid month',
       amount: (v) => (v > 0 ? null : 'Amount must be greater than 0'),
     },
   });
@@ -60,16 +59,18 @@ export function PaymentFormModal({ opened, onClose }: Props) {
     if (opened) {
       form.setFieldValue('paymentDate', new Date());
       form.setFieldValue('amount', data.monthlyContribution);
+      form.setFieldValue('monthLabel', currentMonthLabel());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened]);
 
   async function handleSubmit(values: FormValues) {
-    const monthLabel = `${values.month} ${values.year}`;
+    const monthLabel = values.monthLabel;
+    const year = Number(monthLabel.split(' ').at(-1));
     const payment = await addPayment({
       memberId: values.memberId,
       month: monthLabel,
-      year: Number(values.year),
+      year,
       amount: values.amount,
       paymentDate: values.paymentDate.toISOString(),
     });
@@ -116,20 +117,14 @@ export function PaymentFormModal({ opened, onClose }: Props) {
             required
             {...form.getInputProps('memberId')}
           />
-          <Group grow>
-            <Select
-              label="Month (BS)"
-              data={[...NEPALI_MONTHS]}
-              required
-              {...form.getInputProps('month')}
-            />
-            <Select
-              label="Year (BS)"
-              data={BS_YEARS.map((y) => String(y))}
-              required
-              {...form.getInputProps('year')}
-            />
-          </Group>
+          <Select
+            label="Month (BS)"
+            data={monthOptions}
+            description="Earliest allowed is Ashoj 2082. Future months are OK for advance payments."
+            required
+            searchable
+            {...form.getInputProps('monthLabel')}
+          />
           <Group grow>
             <NumberInput
               label="Amount (Rs)"

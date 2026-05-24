@@ -11,6 +11,7 @@ import {
 import { useDisclosure } from '@mantine/hooks';
 import { IconBuildingBank } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
+import { isContributingMember } from '../../lib/calculations';
 import { useAppStore } from '../../store/useAppStore';
 import { ColorSchemeToggle } from './ColorSchemeToggle';
 import { NavLinks } from './NavLinks';
@@ -20,7 +21,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [mobileOpened, { toggle: toggleMobile, close: closeMobile }] =
     useDisclosure();
   const saving = useAppStore((s) => s.saving);
-  const membersCount = useAppStore((s) => s.data.members.length);
+  const membersCount = useAppStore(
+    (s) => s.data.members.filter(isContributingMember).length
+  );
 
   return (
     <AppShell

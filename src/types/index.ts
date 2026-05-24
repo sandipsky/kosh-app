@@ -5,7 +5,6 @@ export interface Member {
   id: string;
   name: string;
   username: string;
-  password: string;
   email: string;
   gender: Gender;
   role: Role;
