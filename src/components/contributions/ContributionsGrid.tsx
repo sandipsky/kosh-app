@@ -1,8 +1,10 @@
 import { Card, Group, Text } from '@mantine/core';
 import { useMemo } from 'react';
 import { allKoshMonths, isContributingMember } from '../../lib/calculations';
+import { exportToExcel, exportToPdf, type ExportTable } from '../../lib/export';
 import { fmt } from '../../lib/formatters';
 import { useAppStore } from '../../store/useAppStore';
+import { ExportButtons } from '../common/ExportButtons';
 import { MemberAvatar } from '../common/MemberAvatar';
 
 export function ContributionsGrid() {
@@ -33,14 +35,56 @@ export function ContributionsGrid() {
     [data.payments]
   );
 
+  function buildTable(): ExportTable {
+    const columns = ['Month', ...contribMembers.map((m) => m.name), 'Monthly total'];
+    const rows = months.map((month) => {
+      const row: (string | number)[] = [month];
+      let rowTotal = 0;
+      for (const m of contribMembers) {
+        const pay = data.payments.find(
+          (p) => p.memberId === m.id && p.month === month
+        );
+        row.push(pay ? pay.amount : 0);
+        rowTotal += pay?.amount ?? 0;
+      }
+      row.push(rowTotal);
+      return row;
+    });
+    const footer: (string | number)[] = ['Grand total'];
+    for (const m of contribMembers) {
+      footer.push(grandTotalByMember[m.id] ?? 0);
+    }
+    footer.push(grandTotal);
+    return { name: 'Contributions', columns, rows, footer };
+  }
+
+  function handleExcel() {
+    exportToExcel('kosh-contributions', [buildTable()]);
+  }
+
+  function handlePdf() {
+    exportToPdf('kosh-contributions', 'Kosh — Contributions by month', [
+      buildTable(),
+    ]);
+  }
+
   return (
     <Card padding="md" radius="md">
-      <Text size="sm" fw={600} tt="uppercase" c="dimmed" mb="xs">
-        Contributions by month
-      </Text>
-      <Text size="xs" c="dimmed" mb="md">
-        First column and bottom row stay visible while scrolling.
-      </Text>
+      <Group justify="space-between" align="flex-start" mb="md" wrap="wrap">
+        <div>
+          <Text size="sm" fw={600} tt="uppercase" c="dimmed">
+            Contributions by month
+          </Text>
+          <Text size="xs" c="dimmed">
+            First column and bottom row stay visible while scrolling.
+          </Text>
+        </div>
+        <ExportButtons
+          onExcel={handleExcel}
+          onPdf={handlePdf}
+          disabled={contribMembers.length === 0 || months.length === 0}
+        />
+      </Group>
 
       <div className="sticky-table-wrap">
         <table className="sticky-table">

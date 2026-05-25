@@ -18,8 +18,10 @@ import {
   memberStatus,
   memberTotal,
 } from '../../lib/calculations';
+import { exportToExcel, exportToPdf, type ExportTable } from '../../lib/export';
 import { fmt } from '../../lib/formatters';
 import { useAppStore } from '../../store/useAppStore';
+import { ExportButtons } from '../common/ExportButtons';
 import { MemberAvatar } from '../common/MemberAvatar';
 import { RoleBadge } from '../common/RoleBadge';
 import { StatusBadge } from '../common/StatusBadge';
@@ -46,6 +48,31 @@ export function MembersTable() {
   function openEdit(m: Member) {
     setEditing(m);
     setOpened(true);
+  }
+
+  function buildTable(): ExportTable {
+    return {
+      name: 'Members',
+      columns: ['#', 'Name', 'Username', 'Email', 'Contributed', 'Due', 'Status', 'Role'],
+      rows: visibleMembers.map((m, i) => [
+        i + 1,
+        m.name,
+        m.username,
+        m.email,
+        memberTotal(data, m.id),
+        memberDue(data, m.id),
+        memberStatus(data, m.id),
+        m.role,
+      ]),
+    };
+  }
+
+  function handleExcel() {
+    exportToExcel('kosh-members', [buildTable()]);
+  }
+
+  function handlePdf() {
+    exportToPdf('kosh-members', 'Kosh — Members', [buildTable()]);
   }
 
   function confirmDelete(m: Member) {
@@ -75,15 +102,22 @@ export function MembersTable() {
               {visibleMembers.length} total · Rs {data.monthlyContribution.toLocaleString()} / month
             </Text>
           </div>
-          {canEdit && (
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={openAdd}
-              size="sm"
-            >
-              Add member
-            </Button>
-          )}
+          <Group gap="xs" wrap="wrap">
+            <ExportButtons
+              onExcel={handleExcel}
+              onPdf={handlePdf}
+              disabled={visibleMembers.length === 0}
+            />
+            {canEdit && (
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={openAdd}
+                size="sm"
+              >
+                Add member
+              </Button>
+            )}
+          </Group>
         </Group>
 
         <Table.ScrollContainer minWidth={780}>

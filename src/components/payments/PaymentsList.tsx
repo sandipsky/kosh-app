@@ -15,8 +15,10 @@ import { useAuth } from '../../hooks/useAuth';
 import { canManagePayments } from '../../lib/permissions';
 import { MONTHS_ORDER } from '../../constants/months';
 import { findMember } from '../../lib/calculations';
+import { exportToExcel, exportToPdf, type ExportTable } from '../../lib/export';
 import { fmt, formatDate } from '../../lib/formatters';
 import { useAppStore } from '../../store/useAppStore';
+import { ExportButtons } from '../common/ExportButtons';
 import { MemberAvatar } from '../common/MemberAvatar';
 import { PaymentFormModal } from './PaymentFormModal';
 import type { Payment } from '../../types';
@@ -63,6 +65,30 @@ export function PaymentsList() {
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const pageItems = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  function buildTable(): ExportTable {
+    const total = sorted.reduce((s, p) => s + p.amount, 0);
+    return {
+      name: 'Payments',
+      columns: ['#', 'Member', 'Month / Year', 'Payment date', 'Amount'],
+      rows: sorted.map((p, i) => [
+        i + 1,
+        findMember(data, p.memberId)?.name ?? p.memberId,
+        p.month,
+        formatDate(p.paymentDate),
+        p.amount,
+      ]),
+      footer: ['', '', '', 'Total', total],
+    };
+  }
+
+  function handleExcel() {
+    exportToExcel('kosh-payments', [buildTable()]);
+  }
+
+  function handlePdf() {
+    exportToPdf('kosh-payments', 'Kosh — Payments', [buildTable()]);
+  }
+
   function confirmDelete(p: Payment) {
     const m = findMember(data, p.memberId);
     modals.openConfirmModal({
@@ -91,15 +117,22 @@ export function PaymentsList() {
               {sorted.length} total payment{sorted.length === 1 ? '' : 's'}
             </Text>
           </div>
-          {canEdit && (
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={openCreate}
-              size="sm"
-            >
-              Add payment
-            </Button>
-          )}
+          <Group gap="xs" wrap="wrap">
+            <ExportButtons
+              onExcel={handleExcel}
+              onPdf={handlePdf}
+              disabled={sorted.length === 0}
+            />
+            {canEdit && (
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={openCreate}
+                size="sm"
+              >
+                Add payment
+              </Button>
+            )}
+          </Group>
         </Group>
 
         {sorted.length === 0 ? (
