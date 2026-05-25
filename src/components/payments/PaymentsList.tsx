@@ -9,7 +9,7 @@ import {
   Text,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
-import { IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { canManagePayments } from '../../lib/permissions';
@@ -31,7 +31,23 @@ export function PaymentsList() {
   const deletePayment = useAppStore((s) => s.deletePayment);
 
   const [opened, setOpened] = useState(false);
+  const [editing, setEditing] = useState<Payment | null>(null);
   const [page, setPage] = useState(1);
+
+  function closeModal() {
+    setOpened(false);
+    setEditing(null);
+  }
+
+  function openEdit(p: Payment) {
+    setEditing(p);
+    setOpened(true);
+  }
+
+  function openCreate() {
+    setEditing(null);
+    setOpened(true);
+  }
 
   const sorted = useMemo(
     () =>
@@ -78,7 +94,7 @@ export function PaymentsList() {
           {canEdit && (
             <Button
               leftSection={<IconPlus size={16} />}
-              onClick={() => setOpened(true)}
+              onClick={openCreate}
               size="sm"
             >
               Add payment
@@ -100,7 +116,7 @@ export function PaymentsList() {
                     <Table.Th>Month / Year</Table.Th>
                     <Table.Th>Payment date</Table.Th>
                     <Table.Th ta="right">Amount</Table.Th>
-                    {canEdit && <Table.Th style={{ width: 60 }} />}
+                    {canEdit && <Table.Th style={{ width: 100 }} />}
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -129,14 +145,23 @@ export function PaymentsList() {
                         </Table.Td>
                         {canEdit && (
                           <Table.Td>
-                            <ActionIcon
-                              variant="subtle"
-                              color="red"
-                              aria-label="Delete payment"
-                              onClick={() => confirmDelete(p)}
-                            >
-                              <IconTrash size={16} />
-                            </ActionIcon>
+                            <Group gap={4} wrap="nowrap" justify="flex-end">
+                              <ActionIcon
+                                variant="subtle"
+                                aria-label="Edit payment"
+                                onClick={() => openEdit(p)}
+                              >
+                                <IconPencil size={16} />
+                              </ActionIcon>
+                              <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                aria-label="Delete payment"
+                                onClick={() => confirmDelete(p)}
+                              >
+                                <IconTrash size={16} />
+                              </ActionIcon>
+                            </Group>
                           </Table.Td>
                         )}
                       </Table.Tr>
@@ -160,7 +185,7 @@ export function PaymentsList() {
         )}
       </Card>
 
-      <PaymentFormModal opened={opened} onClose={() => setOpened(false)} />
+      <PaymentFormModal opened={opened} onClose={closeModal} editing={editing} />
     </Stack>
   );
 }

@@ -15,22 +15,29 @@ import { useEffect, useState } from 'react';
 import { currentMonthLabel } from '../../constants/months';
 import { allPaymentMonths, isContributingMember } from '../../lib/calculations';
 import { useAppStore } from '../../store/useAppStore';
+import type { Payment } from '../../types';
 
 interface Props {
   opened: boolean;
   onClose: () => void;
+  editing?: Payment | null;
 }
 
 interface FormValues {
   memberId: string;
   monthLabel: string; // "Ashoj 2082"
   amount: number;
-  paymentDate: Date;
+  paymentDate: Date | string;
 }
 
-export function PaymentFormModal({ opened, onClose }: Props) {
+function toDate(value: Date | string): Date {
+  return value instanceof Date ? value : new Date(value);
+}
+
+export function PaymentFormModal({ opened, onClose, editing }: Props) {
   const data = useAppStore((s) => s.data);
   const addPayment = useAppStore((s) => s.addPayment);
+  const updatePayment = useAppStore((s) => s.updatePayment);
   const [error, setError] = useState<string | null>(null);
 
   const memberOptions = data.members
@@ -56,23 +63,67 @@ export function PaymentFormModal({ opened, onClose }: Props) {
   });
 
   useEffect(() => {
-    if (opened) {
-      form.setFieldValue('paymentDate', new Date());
-      form.setFieldValue('amount', data.monthlyContribution);
-      form.setFieldValue('monthLabel', currentMonthLabel());
+    if (!opened) return;
+    setError(null);
+    if (editing) {
+      form.setValues({
+        memberId: editing.memberId,
+        monthLabel: editing.month,
+        amount: editing.amount,
+        paymentDate: new Date(editing.paymentDate),
+      });
+    } else {
+      form.setValues({
+        memberId: memberOptions[0]?.value ?? '',
+        monthLabel: currentMonthLabel(),
+        amount: data.monthlyContribution,
+        paymentDate: new Date(),
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened]);
+  }, [opened, editing?.id]);
 
   async function handleSubmit(values: FormValues) {
     const monthLabel = values.monthLabel;
     const year = Number(monthLabel.split(' ').at(-1));
+
+    if (editing) {
+      const conflict = data.payments.find(
+        (p) =>
+          p.id !== editing.id &&
+          p.memberId === values.memberId &&
+          p.month === monthLabel
+      );
+      if (conflict) {
+        const memberName =
+          data.members.find((m) => m.id === values.memberId)?.name ?? 'Member';
+        setError(`${memberName} already has a payment recorded for ${monthLabel}.`);
+        return;
+      }
+      await updatePayment(editing.id, {
+        memberId: values.memberId,
+        month: monthLabel,
+        year,
+        amount: values.amount,
+        paymentDate: toDate(values.paymentDate).toISOString(),
+      });
+      notifications.show({
+        title: 'Payment updated',
+        message: `${data.members.find((m) => m.id === values.memberId)?.name} · ${monthLabel}`,
+        color: 'teal',
+        autoClose: 2000,
+      });
+      setError(null);
+      onClose();
+      return;
+    }
+
     const payment = await addPayment({
       memberId: values.memberId,
       month: monthLabel,
       year,
       amount: values.amount,
-      paymentDate: values.paymentDate.toISOString(),
+      paymentDate: toDate(values.paymentDate).toISOString(),
     });
     if (!payment) {
       const memberName =
@@ -99,7 +150,7 @@ export function PaymentFormModal({ opened, onClose }: Props) {
         setError(null);
         onClose();
       }}
-      title="Record a payment"
+      title={editing ? 'Edit payment' : 'Record a payment'}
       centered
       size="md"
     >
@@ -143,7 +194,7 @@ export function PaymentFormModal({ opened, onClose }: Props) {
             <Button variant="default" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit">Record payment</Button>
+            <Button type="submit">{editing ? 'Save changes' : 'Record payment'}</Button>
           </Group>
         </Stack>
       </form>
