@@ -21,6 +21,12 @@ export interface Payment {
   year: number;
   amount: number;
   paymentDate: string;
+  // Optional receipt stored in Firebase Storage. `attachmentUrl` is the public
+  // download URL; `attachmentPath` is the storage path used to delete the file.
+  // The same file may be shared across the months created in one bulk payment.
+  attachmentUrl?: string;
+  attachmentPath?: string;
+  attachmentName?: string;
 }
 
 export interface Investment {

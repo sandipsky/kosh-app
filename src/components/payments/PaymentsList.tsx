@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Anchor,
   Button,
   Card,
   Group,
@@ -7,9 +8,15 @@ import {
   Stack,
   Table,
   Text,
+  Tooltip,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
-import { IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
+import {
+  IconPaperclip,
+  IconPencil,
+  IconPlus,
+  IconTrash,
+} from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { canManagePayments } from '../../lib/permissions';
@@ -164,7 +171,25 @@ export function PaymentsList() {
                           </Group>
                         </Table.Td>
                         <Table.Td>
-                          <Text size="sm">{p.month}</Text>
+                          <Group gap={6} wrap="nowrap">
+                            <Text size="sm">{p.month}</Text>
+                            {p.attachmentUrl && (
+                              <Tooltip
+                                label={p.attachmentName ?? 'View receipt'}
+                                withArrow
+                              >
+                                <Anchor
+                                  href={p.attachmentUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-label="View receipt"
+                                  display="inline-flex"
+                                >
+                                  <IconPaperclip size={15} />
+                                </Anchor>
+                              </Tooltip>
+                            )}
+                          </Group>
                         </Table.Td>
                         <Table.Td>
                           <Text size="sm" c="dimmed">

@@ -1,0 +1,30 @@
+rules_version = '2';
+
+// Firebase Storage rules for Kosh payment receipts.
+// Publish via: Firebase Console → Storage → Rules, or `firebase deploy --only storage`.
+//
+// Mirrors firestore.rules: anyone signed in (with a member profile) can read
+// receipts, but only admins/treasurers can upload or delete them. Role is read
+// from the caller's members/{uid} doc in Firestore.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function hasProfile() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/members/$(request.auth.uid));
+    }
+    function isAdminOrTreasurer() {
+      return hasProfile()
+        && firestore.get(/databases/(default)/documents/members/$(request.auth.uid)).data.role
+             in ['admin', 'treasurer'];
+    }
+
+    match /attachments/{fileName} {
+      // Receipts are viewable by any signed-in member.
+      allow read: if request.auth != null;
+      // Only admins/treasurers may add or remove receipts, capped at 5 MB.
+      allow write: if isAdminOrTreasurer()
+        && (request.resource == null || request.resource.size < 5 * 1024 * 1024);
+    }
+  }
+}

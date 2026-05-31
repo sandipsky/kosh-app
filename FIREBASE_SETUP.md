@@ -18,7 +18,13 @@ Console → Firestore Database → **Rules** tab → paste the contents of [fire
 
 The rules currently grant a one-time bootstrap to `admin@admin.com`: that email may self-create its own admin profile on first login. Everything else requires an existing admin/treasurer. Once you have at least one admin doc in Firestore, you can edit the rules and remove the `isBootstrapAdmin()` clause for safety (optional).
 
-### 3. (Optional but recommended) Set the auth domain
+### 3. Enable Storage + publish its rules (for payment receipts)
+
+Payment receipts are uploaded to Firebase Storage. Console → Build → **Storage** → "Get started" → start in **production mode** → same region as Firestore. Then Console → Storage → **Rules** tab → paste the contents of [storage.rules](storage.rules) → **Publish**.
+
+These rules mirror the Firestore ones: any signed-in member can view receipts, but only admins/treasurers can upload or delete them (files capped at 5 MB). If you skip this step, recording a payment still works — only the file upload fails.
+
+### 4. (Optional but recommended) Set the auth domain
 
 Console → Authentication → **Settings** tab → "Authorized domains" → add your Netlify domain once deployed. `localhost` is added by default.
 
@@ -68,6 +74,7 @@ The Firebase web API key is **not a secret** — it's a public client identifier
 ## Hardening checklist (when you're ready to share publicly)
 
 - [ ] Tighten [firestore.rules](firestore.rules) — remove the bootstrap clause once you have a real admin
+- [ ] Publish [storage.rules](storage.rules) so payment-receipt uploads are gated to admins/treasurers
 - [ ] Add Netlify domain to Firebase "Authorized domains"
 - [ ] Enable Firebase App Check (optional, prevents abuse from non-app clients)
 - [ ] Set Firestore retention/backup if data matters long-term

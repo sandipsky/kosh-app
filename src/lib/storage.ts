@@ -1,14 +1,28 @@
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   onSnapshot,
   setDoc,
   updateDoc,
 } from 'firebase/firestore';
 import type { Unsubscribe } from 'firebase/firestore';
-import { db } from './firebase';
+import {
+  deleteObject,
+  getDownloadURL,
+  ref,
+  uploadBytes,
+} from 'firebase/storage';
+import { v4 as uuid } from 'uuid';
+import { db, fileStorage } from './firebase';
 import type { AppData, Investment, Member, Payment } from '../types';
+
+export interface Attachment {
+  url: string;
+  path: string;
+  name: string;
+}
 
 const MEMBERS = 'members';
 const PAYMENTS = 'payments';
@@ -21,6 +35,9 @@ export interface DataStore {
   deleteMember(id: string): Promise<void>;
   savePayment(payment: Payment): Promise<void>;
   deletePayment(id: string): Promise<void>;
+  uploadAttachment(file: File): Promise<Attachment>;
+  deleteAttachment(path: string): Promise<void>;
+  clearPaymentAttachment(id: string): Promise<void>;
   saveInvestment(inv: Investment): Promise<void>;
   deleteInvestment(id: string): Promise<void>;
   setCashInBank(n: number): Promise<void>;
@@ -38,6 +55,16 @@ const EMPTY: AppData = {
 
 function withStamp(): { lastUpdated: string } {
   return { lastUpdated: new Date().toISOString() };
+}
+
+// Firestore is not configured with ignoreUndefinedProperties, so any undefined
+// field would make setDoc throw. Drop them before writing.
+function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k as keyof T] = v as T[keyof T];
+  }
+  return out;
 }
 
 class FirestoreStore implements DataStore {
@@ -106,11 +133,31 @@ class FirestoreStore implements DataStore {
 
   async savePayment(payment: Payment): Promise<void> {
     const { id, ...rest } = payment;
-    await setDoc(doc(db, PAYMENTS, id), rest, { merge: true });
+    await setDoc(doc(db, PAYMENTS, id), stripUndefined(rest), { merge: true });
   }
 
   async deletePayment(id: string): Promise<void> {
     await deleteDoc(doc(db, PAYMENTS, id));
+  }
+
+  async uploadAttachment(file: File): Promise<Attachment> {
+    const path = `attachments/${uuid()}-${file.name}`;
+    const storageRef = ref(fileStorage, path);
+    await uploadBytes(storageRef, file, { contentType: file.type });
+    const url = await getDownloadURL(storageRef);
+    return { url, path, name: file.name };
+  }
+
+  async deleteAttachment(path: string): Promise<void> {
+    await deleteObject(ref(fileStorage, path));
+  }
+
+  async clearPaymentAttachment(id: string): Promise<void> {
+    await updateDoc(doc(db, PAYMENTS, id), {
+      attachmentUrl: deleteField(),
+      attachmentPath: deleteField(),
+      attachmentName: deleteField(),
+    });
   }
 
   async saveInvestment(inv: Investment): Promise<void> {

@@ -1,6 +1,6 @@
 # Kosh — Claude Code instructions
 
-Single-fund, group-savings app for friends contributing a fixed amount each Nepali month. Members log in to view; admins/treasurers log in to manage. **Backend is Firebase (Auth + Firestore)** with real-time sync.
+Single-fund, group-savings app for friends contributing a fixed amount each Nepali month. Members log in to view; admins/treasurers log in to manage. **Backend is Firebase (Auth + Firestore + Storage)** with real-time sync. Storage holds only payment-receipt attachments; rules live in [storage.rules](storage.rules).
 
 ## Run
 

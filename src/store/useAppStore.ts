@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import type { Unsubscribe } from 'firebase/firestore';
 import type { AppData, Investment, Member, Payment } from '../types';
 import { storage } from '../lib/storage';
+import type { Attachment } from '../lib/storage';
 
 interface AppState {
   data: AppData;
@@ -18,6 +19,10 @@ interface AppState {
   addPayment: (payment: Omit<Payment, 'id'>) => Promise<Payment | null>;
   updatePayment: (id: string, patch: Partial<Payment>) => Promise<void>;
   deletePayment: (id: string) => Promise<void>;
+
+  uploadAttachment: (file: File) => Promise<Attachment>;
+  removeAttachment: (paymentId: string) => Promise<void>;
+  deleteAttachment: (path: string) => Promise<void>;
 
   upsertInvestment: (
     inv: Omit<Investment, 'id'> & { id?: string }
@@ -96,10 +101,76 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!existing) return;
     const updated: Payment = { ...existing, ...patch, id };
     await withSaving(set, () => storage.savePayment(updated));
+    // If the attachment was replaced, drop the old file when nothing else uses it.
+    const oldPath = existing.attachmentPath;
+    if (oldPath && patch.attachmentPath && patch.attachmentPath !== oldPath) {
+      const stillUsed = data.payments.some(
+        (p) => p.id !== id && p.attachmentPath === oldPath
+      );
+      if (!stillUsed) {
+        try {
+          await storage.deleteAttachment(oldPath);
+        } catch {
+          // ignore storage cleanup failures
+        }
+      }
+    }
   },
 
   async deletePayment(id) {
-    await withSaving(set, () => storage.deletePayment(id));
+    const { data } = get();
+    const target = data.payments.find((p) => p.id === id);
+    await withSaving(set, async () => {
+      await storage.deletePayment(id);
+      // Only remove the stored file if no other payment still references it
+      // (bulk payments share one receipt across several months).
+      const path = target?.attachmentPath;
+      if (path) {
+        const stillUsed = data.payments.some(
+          (p) => p.id !== id && p.attachmentPath === path
+        );
+        if (!stillUsed) {
+          try {
+            await storage.deleteAttachment(path);
+          } catch {
+            // Orphaned file is harmless; ignore storage cleanup failures.
+          }
+        }
+      }
+    });
+  },
+
+  async uploadAttachment(file) {
+    return withSaving(set, () => storage.uploadAttachment(file));
+  },
+
+  async deleteAttachment(path) {
+    try {
+      await storage.deleteAttachment(path);
+    } catch {
+      // ignore storage cleanup failures
+    }
+  },
+
+  async removeAttachment(paymentId) {
+    const { data } = get();
+    const target = data.payments.find((p) => p.id === paymentId);
+    await withSaving(set, async () => {
+      await storage.clearPaymentAttachment(paymentId);
+      const path = target?.attachmentPath;
+      if (path) {
+        const stillUsed = data.payments.some(
+          (p) => p.id !== paymentId && p.attachmentPath === path
+        );
+        if (!stillUsed) {
+          try {
+            await storage.deleteAttachment(path);
+          } catch {
+            // ignore storage cleanup failures
+          }
+        }
+      }
+    });
   },
 
   async upsertInvestment(inv) {
