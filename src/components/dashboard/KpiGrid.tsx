@@ -4,6 +4,7 @@ import {
   IconCash,
   IconChartLine,
   IconCoin,
+  IconPigMoney,
   IconTrendingUp,
   IconWallet,
 } from '@tabler/icons-react';
@@ -11,6 +12,7 @@ import type { ReactNode } from 'react';
 import { fmt, pct } from '../../lib/formatters';
 import {
   cashInBank,
+  loansOutstandingPrincipal,
   pendingDues,
   totalFund,
   totalInvestmentsInvested,
@@ -63,6 +65,12 @@ export function KpiGrid() {
       value: `${gain >= 0 ? '+' : ''}${gainPct}%`,
       color: gain >= 0 ? 'teal' : 'red',
       icon: IconTrendingUp,
+    },
+    {
+      label: 'Out on loan',
+      value: fmt(loansOutstandingPrincipal(data)),
+      color: 'orange',
+      icon: IconPigMoney,
     },
     {
       label: 'Pending dues',

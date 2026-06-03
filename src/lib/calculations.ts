@@ -1,4 +1,4 @@
-import type { AppData, Investment, Member } from '../types';
+import type { AppData, Investment, Loan, Member } from '../types';
 import {
   currentMonthLabel,
   KOSH_START_MONTH,
@@ -29,6 +29,29 @@ export function investmentInvested(inv: Investment): number {
   return inv.units * inv.buyRate;
 }
 
+/**
+ * The members who hold a share in an investment. A stored `participantIds`
+ * list is authoritative; legacy investments without one are treated as shared
+ * by all current contributing members.
+ */
+export function investmentParticipants(
+  data: AppData,
+  inv: Investment
+): Member[] {
+  const contributing = data.members.filter(isContributingMember);
+  if (!inv.participantIds || inv.participantIds.length === 0) {
+    return contributing;
+  }
+  const ids = new Set(inv.participantIds);
+  return contributing.filter((m) => ids.has(m.id));
+}
+
+/** Invested amount (at buy rate) split evenly across the participants. */
+export function investmentShare(participantCount: number, invested: number): number {
+  if (participantCount <= 0) return 0;
+  return invested / participantCount;
+}
+
 export function totalInvestmentsValue(data: AppData): number {
   return data.investments.reduce((s, i) => s + investmentCurrentValue(i), 0);
 }
@@ -37,17 +60,86 @@ export function totalInvestmentsInvested(data: AppData): number {
   return data.investments.reduce((s, i) => s + investmentInvested(i), 0);
 }
 
+// ----- Loans -------------------------------------------------------------
+
+const DAY_MS = 86_400_000;
+
 /**
- * Cash sitting in the kosh bank account = everything collected minus what
- * was already deployed into investments (at buy rates).
- * Derived live from contributions + investments — not stored.
+ * Days a loan has been (or was) outstanding. Counts from issue date to the
+ * settle date if closed, otherwise to `asOf` (now). Never negative.
+ */
+export function loanDays(loan: Loan, asOf: Date = new Date()): number {
+  const start = new Date(loan.issueDate).getTime();
+  const end = (loan.settledDate ? new Date(loan.settledDate) : asOf).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end)) return 0;
+  return Math.max(0, (end - start) / DAY_MS);
+}
+
+/**
+ * Simple annual interest: principal × rate% × (days / 365).
+ * Defaulted loans earn nothing — the interest is written off with the principal.
+ */
+export function loanInterest(loan: Loan, asOf: Date = new Date()): number {
+  if (loan.status === 'defaulted') return 0;
+  return loan.principal * (loan.interestRate / 100) * (loanDays(loan, asOf) / 365);
+}
+
+/** Principal + interest accrued so far (or at settlement). */
+export function loanTotalDue(loan: Loan, asOf: Date = new Date()): number {
+  return loan.principal + loanInterest(loan, asOf);
+}
+
+export function activeLoans(data: AppData): Loan[] {
+  return data.loans.filter((l) => l.status === 'active');
+}
+
+/** Principal currently lent out and not yet repaid (active loans). */
+export function loansOutstandingPrincipal(data: AppData): number {
+  return activeLoans(data).reduce((s, l) => s + l.principal, 0);
+}
+
+/** Principal lost to defaults — money that will never come back. */
+export function loansDefaultedPrincipal(data: AppData): number {
+  return data.loans
+    .filter((l) => l.status === 'defaulted')
+    .reduce((s, l) => s + l.principal, 0);
+}
+
+/** Realized interest income from loans that have been fully repaid. */
+export function loansInterestEarned(data: AppData): number {
+  return data.loans
+    .filter((l) => l.status === 'repaid')
+    .reduce((s, l) => s + loanInterest(l), 0);
+}
+
+/**
+ * Value of active loans as a fund asset: outstanding principal plus the
+ * interest accrued on it to date.
+ */
+export function loansReceivable(data: AppData): number {
+  return activeLoans(data).reduce((s, l) => s + loanTotalDue(l), 0);
+}
+
+// -------------------------------------------------------------------------
+
+/**
+ * Cash sitting in the kosh bank account = everything collected, minus what
+ * was deployed into investments (at buy rates), minus principal currently out
+ * on loan and principal lost to defaults, plus interest already collected on
+ * repaid loans. Derived live — not stored.
  */
 export function cashInBank(data: AppData): number {
-  return totalContrib(data) - totalInvestmentsInvested(data);
+  return (
+    totalContrib(data) -
+    totalInvestmentsInvested(data) -
+    loansOutstandingPrincipal(data) -
+    loansDefaultedPrincipal(data) +
+    loansInterestEarned(data)
+  );
 }
 
 export function totalFund(data: AppData): number {
-  return cashInBank(data) + totalInvestmentsValue(data);
+  return cashInBank(data) + totalInvestmentsValue(data) + loansReceivable(data);
 }
 
 /**

@@ -4,6 +4,7 @@ import type { Member } from '../types';
 export interface AuthContextValue {
   currentUser: Member | null;
   authReady: boolean;
+  isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<string | null>;

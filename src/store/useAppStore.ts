@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { v4 as uuid } from 'uuid';
 import type { Unsubscribe } from 'firebase/firestore';
-import type { AppData, Investment, Member, Payment } from '../types';
+import type { AppData, Investment, Loan, Member, Payment } from '../types';
 import { storage } from '../lib/storage';
 import type { Attachment } from '../lib/storage';
 
@@ -29,6 +29,9 @@ interface AppState {
   ) => Promise<Investment>;
   deleteInvestment: (id: string) => Promise<void>;
 
+  upsertLoan: (loan: Omit<Loan, 'id'> & { id?: string }) => Promise<Loan>;
+  deleteLoan: (id: string) => Promise<void>;
+
   setCashInBank: (n: number) => Promise<void>;
   setInvestmentRate: (id: string, rate: number) => Promise<void>;
   setMonthlyContribution: (n: number) => Promise<void>;
@@ -38,6 +41,7 @@ const EMPTY: AppData = {
   members: [],
   payments: [],
   investments: [],
+  loans: [],
   cashInBank: 0,
   monthlyContribution: 2000,
   lastUpdated: new Date().toISOString(),
@@ -182,6 +186,17 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async deleteInvestment(id) {
     await withSaving(set, () => storage.deleteInvestment(id));
+  },
+
+  async upsertLoan(loan) {
+    const id = loan.id ?? uuid();
+    const result: Loan = { ...(loan as Omit<Loan, 'id'>), id };
+    await withSaving(set, () => storage.saveLoan(result));
+    return result;
+  },
+
+  async deleteLoan(id) {
+    await withSaving(set, () => storage.deleteLoan(id));
   },
 
   async setCashInBank(n) {

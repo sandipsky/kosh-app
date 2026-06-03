@@ -6,6 +6,7 @@ import {
   Stack,
   Text,
   ThemeIcon,
+  Tooltip,
 } from '@mantine/core';
 import {
   IconBolt,
@@ -14,14 +15,19 @@ import {
   IconTrash,
   IconTrendingDown,
   IconTrendingUp,
+  IconUsers,
 } from '@tabler/icons-react';
 import { useAuth } from '../../hooks/useAuth';
 import { canManageInvestments } from '../../lib/permissions';
 import {
   investmentCurrentValue,
   investmentInvested,
+  investmentParticipants,
+  investmentShare,
 } from '../../lib/calculations';
 import { fmt, pct } from '../../lib/formatters';
+import { useAppStore } from '../../store/useAppStore';
+import { MemberAvatar } from '../common/MemberAvatar';
 import type { Investment } from '../../types';
 
 interface Props {
@@ -34,11 +40,19 @@ export function InvestmentCard({ investment, onEdit, onDelete }: Props) {
   const { currentUser } = useAuth();
   const canEdit = canManageInvestments(currentUser?.role);
 
+  const data = useAppStore((s) => s.data);
+
   const invested = investmentInvested(investment);
   const current = investmentCurrentValue(investment);
   const gain = current - invested;
   const gainPct = pct(gain, invested || 1);
   const positive = gain >= 0;
+
+  const participants = investmentParticipants(data, investment);
+  const perMember = investmentShare(participants.length, invested);
+  const explicit = Boolean(
+    investment.participantIds && investment.participantIds.length > 0
+  );
 
   return (
     <Card padding="md" radius="md">
@@ -144,6 +158,36 @@ export function InvestmentCard({ investment, onEdit, onDelete }: Props) {
           </Text>
         </Stack>
       </Group>
+
+      <Stack gap={6} mt="md">
+        <Group gap={6} wrap="nowrap">
+          <IconUsers size={14} color="var(--mantine-color-dimmed)" />
+          <Text size="xs" c="dimmed" tt="uppercase">
+            Shareholders · {participants.length}
+            {!explicit && ' (all members)'}
+          </Text>
+          {participants.length > 0 && (
+            <Text size="xs" c="dimmed">
+              · {fmt(perMember)} each
+            </Text>
+          )}
+        </Group>
+        {participants.length > 0 ? (
+          <Group gap={4} wrap="wrap">
+            {participants.map((m) => (
+              <Tooltip key={m.id} label={m.name} withArrow>
+                <span style={{ display: 'inline-flex' }}>
+                  <MemberAvatar member={m} size={24} />
+                </span>
+              </Tooltip>
+            ))}
+          </Group>
+        ) : (
+          <Text size="xs" c="dimmed">
+            No shareholders assigned.
+          </Text>
+        )}
+      </Stack>
 
       {investment.description && (
         <Text size="sm" c="dimmed" mt="sm">

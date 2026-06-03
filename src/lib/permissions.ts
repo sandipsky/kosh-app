@@ -12,6 +12,10 @@ export function canManageInvestments(role: Role | undefined): boolean {
   return role === 'admin' || role === 'treasurer';
 }
 
+export function canManageLoans(role: Role | undefined): boolean {
+  return role === 'admin' || role === 'treasurer';
+}
+
 export function canUpdateFundValues(role: Role | undefined): boolean {
   return role === 'admin' || role === 'treasurer';
 }

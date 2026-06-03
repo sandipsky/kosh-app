@@ -28,6 +28,7 @@ First-run setup is documented in [FIREBASE_SETUP.md](FIREBASE_SETUP.md). The def
 members/{uid}                # uid = Firebase Auth UID; profile only (no password)
 payments/{paymentId}         # random uuid IDs
 investments/{investmentId}
+loans/{loanId}               # loans to members or outside parties; annual simple interest
 config/fund                  # single doc: cashInBank, monthlyContribution, lastUpdated
 ```
 

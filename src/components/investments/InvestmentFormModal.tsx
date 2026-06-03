@@ -2,6 +2,7 @@ import {
   Button,
   Group,
   Modal,
+  MultiSelect,
   NumberInput,
   Select,
   Stack,
@@ -11,13 +12,14 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   BS_YEARS,
   currentNepaliMonth,
   currentNepaliYear,
   NEPALI_MONTHS,
 } from '../../constants/months';
+import { isContributingMember } from '../../lib/calculations';
 import { fmt } from '../../lib/formatters';
 import { useAppStore } from '../../store/useAppStore';
 import type { Investment } from '../../types';
@@ -42,6 +44,7 @@ interface FormValues {
   units: number;
   status: string;
   notes: string;
+  participantIds: string[];
 }
 
 const TYPE_OPTIONS = ['Local IPO', 'Mutual Fund', 'Fixed Deposit', 'Other'];
@@ -55,6 +58,19 @@ function splitMonthYear(value: string): { month: string; year: string } {
 
 export function InvestmentFormModal({ opened, onClose, editing }: Props) {
   const upsertInvestment = useAppStore((s) => s.upsertInvestment);
+  const members = useAppStore((s) => s.data.members);
+
+  const memberOptions = useMemo(
+    () =>
+      members
+        .filter(isContributingMember)
+        .map((m) => ({ value: m.id, label: m.name })),
+    [members]
+  );
+  const allMemberIds = useMemo(
+    () => memberOptions.map((o) => o.value),
+    [memberOptions]
+  );
 
   const form = useForm<FormValues>({
     initialValues: {
@@ -71,6 +87,7 @@ export function InvestmentFormModal({ opened, onClose, editing }: Props) {
       units: 1,
       status: 'Active',
       notes: '',
+      participantIds: [],
     },
     validate: {
       name: (v) => (v.trim().length < 2 ? 'Name is required' : null),
@@ -100,9 +117,13 @@ export function InvestmentFormModal({ opened, onClose, editing }: Props) {
         units: editing.units,
         status: editing.status,
         notes: editing.notes,
+        // Legacy investments without an explicit list default to everyone.
+        participantIds: editing.participantIds ?? allMemberIds,
       });
     } else {
+      // New investment: default to every current contributing member.
       form.reset();
+      form.setFieldValue('participantIds', allMemberIds);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, editing?.id]);
@@ -126,6 +147,7 @@ export function InvestmentFormModal({ opened, onClose, editing }: Props) {
       units: values.units,
       status: values.status,
       notes: values.notes,
+      participantIds: values.participantIds,
     });
     notifications.show({
       title: editing ? 'Investment updated' : 'Investment added',
@@ -209,6 +231,24 @@ export function InvestmentFormModal({ opened, onClose, editing }: Props) {
               value={fmt(totalCurrent)}
             />
           </Group>
+          <MultiSelect
+            label="Shareholders"
+            description="Members whose money is in this investment. Members added later won't get a share unless you add them here."
+            placeholder={
+              form.values.participantIds.length ? undefined : 'Select members'
+            }
+            data={memberOptions}
+            searchable
+            clearable
+            {...form.getInputProps('participantIds')}
+          />
+          {form.values.participantIds.length > 0 && (
+            <Text size="xs" c="dimmed">
+              {fmt(totalBuy / form.values.participantIds.length)} invested per
+              member across {form.values.participantIds.length} shareholder
+              {form.values.participantIds.length === 1 ? '' : 's'}.
+            </Text>
+          )}
           <Textarea
             label="Notes"
             placeholder="Optional notes"

@@ -16,7 +16,7 @@ import {
 } from 'firebase/storage';
 import { v4 as uuid } from 'uuid';
 import { db, fileStorage } from './firebase';
-import type { AppData, Investment, Member, Payment } from '../types';
+import type { AppData, Investment, Loan, Member, Payment } from '../types';
 
 export interface Attachment {
   url: string;
@@ -27,6 +27,7 @@ export interface Attachment {
 const MEMBERS = 'members';
 const PAYMENTS = 'payments';
 const INVESTMENTS = 'investments';
+const LOANS = 'loans';
 const CONFIG_DOC = doc(db, 'config', 'fund');
 
 export interface DataStore {
@@ -40,6 +41,8 @@ export interface DataStore {
   clearPaymentAttachment(id: string): Promise<void>;
   saveInvestment(inv: Investment): Promise<void>;
   deleteInvestment(id: string): Promise<void>;
+  saveLoan(loan: Loan): Promise<void>;
+  deleteLoan(id: string): Promise<void>;
   setCashInBank(n: number): Promise<void>;
   setMonthlyContribution(n: number): Promise<void>;
 }
@@ -48,6 +51,7 @@ const EMPTY: AppData = {
   members: [],
   payments: [],
   investments: [],
+  loans: [],
   cashInBank: 0,
   monthlyContribution: 2000,
   lastUpdated: new Date().toISOString(),
@@ -74,25 +78,49 @@ class FirestoreStore implements DataStore {
     let membersReady = false;
     let paymentsReady = false;
     let investmentsReady = false;
+    let loansReady = false;
 
     const emit = () => {
-      if (configReady && membersReady && paymentsReady && investmentsReady) {
+      if (
+        configReady &&
+        membersReady &&
+        paymentsReady &&
+        investmentsReady &&
+        loansReady
+      ) {
         onChange({ ...current });
       }
     };
 
-    const unsubMembers = onSnapshot(collection(db, MEMBERS), (snap) => {
-      current.members = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Member);
-      membersReady = true;
+    // A listener that errors (e.g. rules not yet published for a collection)
+    // must not hang hydration forever — log it, mark that slice ready with
+    // whatever default it already holds, and let the rest of the app load.
+    const onErr = (name: string, markReady: () => void) => (err: unknown) => {
+      console.error(`Firestore subscribe failed for ${name}:`, err);
+      markReady();
       emit();
-    });
-    const unsubPayments = onSnapshot(collection(db, PAYMENTS), (snap) => {
-      current.payments = snap.docs.map(
-        (d) => ({ id: d.id, ...d.data() }) as Payment
-      );
-      paymentsReady = true;
-      emit();
-    });
+    };
+
+    const unsubMembers = onSnapshot(
+      collection(db, MEMBERS),
+      (snap) => {
+        current.members = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Member);
+        membersReady = true;
+        emit();
+      },
+      onErr(MEMBERS, () => (membersReady = true))
+    );
+    const unsubPayments = onSnapshot(
+      collection(db, PAYMENTS),
+      (snap) => {
+        current.payments = snap.docs.map(
+          (d) => ({ id: d.id, ...d.data() }) as Payment
+        );
+        paymentsReady = true;
+        emit();
+      },
+      onErr(PAYMENTS, () => (paymentsReady = true))
+    );
     const unsubInvestments = onSnapshot(
       collection(db, INVESTMENTS),
       (snap) => {
@@ -101,23 +129,38 @@ class FirestoreStore implements DataStore {
         );
         investmentsReady = true;
         emit();
-      }
+      },
+      onErr(INVESTMENTS, () => (investmentsReady = true))
     );
-    const unsubConfig = onSnapshot(CONFIG_DOC, (snap) => {
-      const d = snap.data();
-      current.cashInBank = (d?.cashInBank as number | undefined) ?? 0;
-      current.monthlyContribution =
-        (d?.monthlyContribution as number | undefined) ?? 2000;
-      current.lastUpdated =
-        (d?.lastUpdated as string | undefined) ?? new Date().toISOString();
-      configReady = true;
-      emit();
-    });
+    const unsubLoans = onSnapshot(
+      collection(db, LOANS),
+      (snap) => {
+        current.loans = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Loan);
+        loansReady = true;
+        emit();
+      },
+      onErr(LOANS, () => (loansReady = true))
+    );
+    const unsubConfig = onSnapshot(
+      CONFIG_DOC,
+      (snap) => {
+        const d = snap.data();
+        current.cashInBank = (d?.cashInBank as number | undefined) ?? 0;
+        current.monthlyContribution =
+          (d?.monthlyContribution as number | undefined) ?? 2000;
+        current.lastUpdated =
+          (d?.lastUpdated as string | undefined) ?? new Date().toISOString();
+        configReady = true;
+        emit();
+      },
+      onErr('config', () => (configReady = true))
+    );
 
     return () => {
       unsubMembers();
       unsubPayments();
       unsubInvestments();
+      unsubLoans();
       unsubConfig();
     };
   }
@@ -167,6 +210,18 @@ class FirestoreStore implements DataStore {
 
   async deleteInvestment(id: string): Promise<void> {
     await deleteDoc(doc(db, INVESTMENTS, id));
+  }
+
+  async saveLoan(loan: Loan): Promise<void> {
+    const { id, ...rest } = loan;
+    // Full overwrite (no merge) so optional fields cleared on edit — e.g. a
+    // settledDate when reopening a loan, or borrowerId when switching to an
+    // outside party — are actually removed rather than left stale.
+    await setDoc(doc(db, LOANS, id), stripUndefined(rest));
+  }
+
+  async deleteLoan(id: string): Promise<void> {
+    await deleteDoc(doc(db, LOANS, id));
   }
 
   async setCashInBank(n: number): Promise<void> {

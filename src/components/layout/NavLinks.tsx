@@ -2,6 +2,7 @@ import { NavLink } from '@mantine/core';
 import {
   IconChartLine,
   IconHome2,
+  IconPigMoney,
   IconPlus,
   IconRocket,
   IconTable,
@@ -15,6 +16,7 @@ const ITEMS = [
   { to: '/contributions', label: 'Contributions', icon: IconTable },
   { to: '/payments', label: 'Payments', icon: IconPlus },
   { to: '/investments', label: 'Investments', icon: IconChartLine },
+  { to: '/loans', label: 'Loans', icon: IconPigMoney },
   { to: '/strategy', label: 'Strategy', icon: IconRocket },
 ];
 

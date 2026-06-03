@@ -5,6 +5,7 @@ import { useAppStore } from '../../store/useAppStore';
 import {
   cashInBank,
   investmentCurrentValue,
+  loansReceivable,
   totalFund,
 } from '../../lib/calculations';
 import { fmt } from '../../lib/formatters';
@@ -15,8 +16,17 @@ export function FundBreakdownChart() {
   const scheme = useComputedColorScheme('light', { getInitialValueInEffect: true });
   const isDark = scheme === 'dark';
 
-  const series: number[] = [cashInBank(data), ...data.investments.map(investmentCurrentValue)];
-  const labels: string[] = ['Cash in bank', ...data.investments.map((i) => i.name)];
+  const onLoan = loansReceivable(data);
+  const series: number[] = [
+    cashInBank(data),
+    ...(onLoan > 0 ? [onLoan] : []),
+    ...data.investments.map(investmentCurrentValue),
+  ];
+  const labels: string[] = [
+    'Cash in bank',
+    ...(onLoan > 0 ? ['Out on loan'] : []),
+    ...data.investments.map((i) => i.name),
+  ];
 
   const labelColor = isDark ? '#C9CCD3' : '#495057';
   const dimmedColor = isDark ? '#909296' : '#868E96';

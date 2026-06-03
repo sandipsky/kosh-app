@@ -42,12 +42,40 @@ export interface Investment {
   units: number;
   status: string;
   notes: string;
+  // Member ids who hold a share in this investment. Captured at the time the
+  // investment is recorded, so members who join later don't get a retroactive
+  // share. Undefined on legacy investments → treated as "all members".
+  participantIds?: string[];
+}
+
+export type BorrowerType = 'member' | 'outside';
+export type LoanStatus = 'active' | 'repaid' | 'defaulted';
+
+export interface Loan {
+  id: string;
+  borrowerType: BorrowerType;
+  // Set only when borrowerType === 'member'; references members/{uid}.
+  borrowerId?: string;
+  // Display name — the outside party's name, or the member's name (denormalized
+  // so the loan still reads correctly if the member is later removed).
+  borrowerName: string;
+  principal: number;
+  // Annual simple interest rate, in percent.
+  interestRate: number;
+  issueDate: string; // ISO 'YYYY-MM-DD'
+  dueDate?: string; // ISO 'YYYY-MM-DD', optional
+  // Date the loan was closed (repaid or written off). Used to stop interest
+  // accruing. Set when status leaves 'active'.
+  settledDate?: string;
+  status: LoanStatus;
+  notes: string;
 }
 
 export interface AppData {
   members: Member[];
   payments: Payment[];
   investments: Investment[];
+  loans: Loan[];
   cashInBank: number;
   monthlyContribution: number;
   lastUpdated: string;
