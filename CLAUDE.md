@@ -29,6 +29,7 @@ members/{uid}                # uid = Firebase Auth UID; profile only (no passwor
 payments/{paymentId}         # random uuid IDs
 investments/{investmentId}
 loans/{loanId}               # loans to members or outside parties; annual simple interest
+                             #   on outstanding principal; repayments[] = installments (interest first)
 config/fund                  # single doc: cashInBank, monthlyContribution, lastUpdated
 ```
 

@@ -1,4 +1,6 @@
 import {
+  arrayRemove,
+  arrayUnion,
   collection,
   deleteDoc,
   deleteField,
@@ -16,7 +18,15 @@ import {
 } from 'firebase/storage';
 import { v4 as uuid } from 'uuid';
 import { db, fileStorage } from './firebase';
-import type { AppData, Investment, Loan, Member, Payment } from '../types';
+import type {
+  AppData,
+  Investment,
+  Loan,
+  LoanRepayment,
+  LoanStatus,
+  Member,
+  Payment,
+} from '../types';
 
 export interface Attachment {
   url: string;
@@ -43,6 +53,12 @@ export interface DataStore {
   deleteInvestment(id: string): Promise<void>;
   saveLoan(loan: Loan): Promise<void>;
   deleteLoan(id: string): Promise<void>;
+  addLoanRepayment(
+    loanId: string,
+    repayment: LoanRepayment,
+    settle?: { status: LoanStatus; settledDate: string }
+  ): Promise<void>;
+  removeLoanRepayment(loanId: string, repayment: LoanRepayment): Promise<void>;
   setCashInBank(n: number): Promise<void>;
   setMonthlyContribution(n: number): Promise<void>;
 }
@@ -222,6 +238,29 @@ class FirestoreStore implements DataStore {
 
   async deleteLoan(id: string): Promise<void> {
     await deleteDoc(doc(db, LOANS, id));
+  }
+
+  // arrayUnion/arrayRemove (rather than rewriting the whole array) so two
+  // treasurers recording installments at the same time can't clobber each other.
+  async addLoanRepayment(
+    loanId: string,
+    repayment: LoanRepayment,
+    settle?: { status: LoanStatus; settledDate: string }
+  ): Promise<void> {
+    await updateDoc(doc(db, LOANS, loanId), {
+      repayments: arrayUnion(stripUndefined({ ...repayment })),
+      ...(settle ?? {}),
+    });
+  }
+
+  async removeLoanRepayment(
+    loanId: string,
+    repayment: LoanRepayment
+  ): Promise<void> {
+    // arrayRemove matches by value, so pass the element exactly as stored.
+    await updateDoc(doc(db, LOANS, loanId), {
+      repayments: arrayRemove(repayment),
+    });
   }
 
   async setCashInBank(n: number): Promise<void> {

@@ -1,8 +1,11 @@
 import {
   ActionIcon,
   Badge,
+  Button,
   Card,
   Group,
+  Progress,
+  SimpleGrid,
   Stack,
   Text,
   ThemeIcon,
@@ -10,37 +13,66 @@ import {
 import {
   IconBuildingStore,
   IconCalendarDue,
-  IconCashBanknote,
+  IconCalendarStats,
   IconEdit,
+  IconReceipt2,
   IconTrash,
 } from '@tabler/icons-react';
 import { useAuth } from '../../hooks/useAuth';
 import { canManageLoans } from '../../lib/permissions';
-import { loanDays, loanInterest, loanTotalDue } from '../../lib/calculations';
+import { loanDays, loanSummary } from '../../lib/calculations';
 import { fmt, formatDate } from '../../lib/formatters';
 import { LOAN_STATUS_COLORS, LOAN_STATUS_LABELS } from '../../constants/loans';
 import { useAppStore } from '../../store/useAppStore';
 import { MemberAvatar } from '../common/MemberAvatar';
 import type { Loan } from '../../types';
+import type { LoanDetailsTab } from './LoanDetailsModal';
 
 interface Props {
   loan: Loan;
   onEdit: (l: Loan) => void;
   onDelete: (l: Loan) => void;
+  onOpenDetails: (l: Loan, tab: LoanDetailsTab) => void;
 }
 
-export function LoanCard({ loan, onEdit, onDelete }: Props) {
+function Metric({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
+  return (
+    <Stack gap={0}>
+      <Text size="xs" c="dimmed" tt="uppercase">
+        {label}
+      </Text>
+      <Text fw={600} size="md" className={`num ${className ?? ''}`}>
+        {value}
+      </Text>
+    </Stack>
+  );
+}
+
+export function LoanCard({ loan, onEdit, onDelete, onOpenDetails }: Props) {
   const { currentUser } = useAuth();
   const canEdit = canManageLoans(currentUser?.role);
   const member = useAppStore((s) =>
     loan.borrowerId ? s.data.members.find((m) => m.id === loan.borrowerId) : undefined
   );
 
-  const interest = loanInterest(loan);
-  const totalDue = loanTotalDue(loan);
+  const summary = loanSummary(loan);
   const days = Math.floor(loanDays(loan));
   const isMember = loan.borrowerType === 'member';
+  const isActive = loan.status === 'active';
   const defaulted = loan.status === 'defaulted';
+  const repaymentCount = loan.repayments?.length ?? 0;
+  const repaidPct =
+    summary.totalRepaid + summary.balanceDue > 0
+      ? (summary.totalRepaid / (summary.totalRepaid + summary.balanceDue)) * 100
+      : 0;
 
   return (
     <Card padding="md" radius="md">
@@ -71,15 +103,15 @@ export function LoanCard({ loan, onEdit, onDelete }: Props) {
             </Group>
             <Text size="xs" c="dimmed">
               {loan.interestRate}% / yr · Issued {formatDate(loan.issueDate)}
-              {loan.status === 'active' ? ` · ${days} day${days === 1 ? '' : 's'}` : ''}
+              {isActive ? ` · ${days} day${days === 1 ? '' : 's'}` : ''}
             </Text>
-            {loan.dueDate && loan.status === 'active' && (
+            {loan.dueDate && isActive && (
               <Group gap={4} className="text-warning">
                 <IconCalendarDue size={12} />
                 <Text size="xs">Due {formatDate(loan.dueDate)}</Text>
               </Group>
             )}
-            {loan.settledDate && loan.status !== 'active' && (
+            {loan.settledDate && !isActive && (
               <Text size="xs" c="dimmed">
                 {loan.status === 'repaid' ? 'Repaid' : 'Written off'}{' '}
                 {formatDate(loan.settledDate)}
@@ -109,45 +141,79 @@ export function LoanCard({ loan, onEdit, onDelete }: Props) {
         )}
       </Group>
 
-      <Group justify="space-between" mt="md" wrap="wrap" gap="sm">
-        <Stack gap={0}>
-          <Text size="xs" c="dimmed" tt="uppercase">
-            Principal
+      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" mt="md">
+        <Metric label="Principal" value={fmt(loan.principal)} />
+        <Metric
+          label={
+            defaulted
+              ? 'Interest collected'
+              : loan.status === 'repaid'
+                ? 'Interest earned'
+                : 'Interest accrued'
+          }
+          value={fmt(summary.totalInterest)}
+          className="text-positive"
+        />
+        <Metric
+          label="Repaid"
+          value={fmt(summary.totalRepaid)}
+          className="text-positive"
+        />
+        {isActive ? (
+          <Metric
+            label="Balance due"
+            value={fmt(summary.balanceDue)}
+            className="text-info"
+          />
+        ) : defaulted ? (
+          <Metric
+            label="Principal lost"
+            value={fmt(summary.principalOutstanding)}
+            className="text-negative"
+          />
+        ) : (
+          <Metric label="Balance due" value={fmt(0)} />
+        )}
+      </SimpleGrid>
+
+      {isActive && repaymentCount > 0 && (
+        <Stack gap={2} mt="sm">
+          <Progress value={repaidPct} color="teal" size="sm" radius="xl" />
+          <Text size="xs" c="dimmed">
+            {Math.round(repaidPct)}% repaid in {repaymentCount} installment
+            {repaymentCount === 1 ? '' : 's'}
           </Text>
-          <Group gap={6} align="center">
-            <IconCashBanknote size={16} color="var(--mantine-color-dimmed)" />
-            <Text fw={600} size="md" className="num">
-              {fmt(loan.principal)}
-            </Text>
-          </Group>
         </Stack>
-        <Stack gap={0}>
-          <Text size="xs" c="dimmed" tt="uppercase">
-            Interest {defaulted ? '(lost)' : loan.status === 'repaid' ? 'earned' : 'accrued'}
-          </Text>
-          <Text
-            fw={600}
-            size="md"
-            className={defaulted ? 'text-negative num' : 'text-positive num'}
-          >
-            {fmt(interest)}
-          </Text>
-        </Stack>
-        <Stack gap={0}>
-          <Text size="xs" c="dimmed" tt="uppercase">
-            {loan.status === 'active' ? 'Total due' : 'Total'}
-          </Text>
-          <Text fw={600} size="md" className="num">
-            {defaulted ? fmt(0) : fmt(totalDue)}
-          </Text>
-        </Stack>
-      </Group>
+      )}
 
       {loan.notes && (
         <Text size="xs" c="dimmed" mt="sm">
           <b>Notes:</b> {loan.notes}
         </Text>
       )}
+
+      <Group gap="xs" mt="md">
+        <Button
+          size="xs"
+          variant="light"
+          leftSection={<IconReceipt2 size={14} />}
+          onClick={() => onOpenDetails(loan, 'repayments')}
+        >
+          {canEdit && isActive
+            ? 'Record repayment'
+            : `Repayments${repaymentCount ? ` (${repaymentCount})` : ''}`}
+        </Button>
+        {isActive && (
+          <Button
+            size="xs"
+            variant="default"
+            leftSection={<IconCalendarStats size={14} />}
+            onClick={() => onOpenDetails(loan, 'plan')}
+          >
+            Monthly plan
+          </Button>
+        )}
+      </Group>
     </Card>
   );
 }

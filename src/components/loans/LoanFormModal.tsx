@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Group,
   Modal,
@@ -12,14 +13,16 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { useEffect, useMemo } from 'react';
+import { IconAlertCircle } from '@tabler/icons-react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   BORROWER_TYPE_OPTIONS,
   DEFAULT_INTEREST_RATE,
   LOAN_STATUS_OPTIONS,
 } from '../../constants/loans';
-import { isContributingMember, loanInterest, loanTotalDue } from '../../lib/calculations';
-import { fmt } from '../../lib/formatters';
+import { isContributingMember, loanSummary } from '../../lib/calculations';
+import { describeSaveError } from '../../lib/errors';
+import { fmt, todayISO, toNumber } from '../../lib/formatters';
 import { useAppStore } from '../../store/useAppStore';
 import type { BorrowerType, Loan, LoanStatus } from '../../types';
 
@@ -33,8 +36,9 @@ interface FormValues {
   borrowerType: BorrowerType;
   borrowerId: string;
   borrowerName: string;
-  principal: number;
-  interestRate: number;
+  // Mantine NumberInput can emit strings ('' when cleared) — see toNumber().
+  principal: number | string;
+  interestRate: number | string;
   issueDate: string;
   dueDate: string;
   settledDate: string;
@@ -42,13 +46,11 @@ interface FormValues {
   notes: string;
 }
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function LoanFormModal({ opened, onClose, editing }: Props) {
   const upsertLoan = useAppStore((s) => s.upsertLoan);
   const members = useAppStore((s) => s.data.members);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const memberOptions = useMemo(
     () =>
@@ -65,15 +67,21 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
       borrowerName: '',
       principal: 0,
       interestRate: DEFAULT_INTEREST_RATE.member,
-      issueDate: today(),
+      issueDate: todayISO(),
       dueDate: '',
       settledDate: '',
       status: 'active',
       notes: '',
     },
     validate: {
-      principal: (v) => (v > 0 ? null : 'Principal must be greater than 0'),
-      interestRate: (v) => (v >= 0 ? null : 'Rate cannot be negative'),
+      principal: (v) => {
+        const n = toNumber(v);
+        return n !== null && n > 0 ? null : 'Principal must be greater than 0';
+      },
+      interestRate: (v) => {
+        const n = toNumber(v);
+        return n !== null && n >= 0 ? null : 'Enter an interest rate (0 or more)';
+      },
       issueDate: (v) => (v ? null : 'Issue date is required'),
       borrowerId: (v, values) =>
         values.borrowerType === 'member' && !v ? 'Select a member' : null,
@@ -83,6 +91,12 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
           : null,
     },
   });
+
+  // Clear any error from a failed attempt so it doesn't greet the next opening.
+  function close() {
+    setError(null);
+    onClose();
+  }
 
   useEffect(() => {
     if (!opened) return;
@@ -101,6 +115,7 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
       });
     } else {
       form.reset();
+      form.setFieldValue('issueDate', todayISO());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, editing?.id]);
@@ -114,20 +129,21 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
   const { borrowerType, status } = form.values;
   const closed = status !== 'active';
 
-  // Live preview of interest using the form values.
+  // Live preview using the form values (and any installments already paid).
   const preview: Loan = {
     id: 'preview',
     borrowerType,
     borrowerName: '',
-    principal: form.values.principal || 0,
-    interestRate: form.values.interestRate || 0,
-    issueDate: form.values.issueDate || today(),
-    settledDate: closed ? form.values.settledDate || today() : undefined,
+    principal: toNumber(form.values.principal) ?? 0,
+    interestRate: toNumber(form.values.interestRate) ?? 0,
+    issueDate: form.values.issueDate || todayISO(),
+    settledDate: closed ? form.values.settledDate || todayISO() : undefined,
     status,
     notes: '',
+    repayments: editing?.repayments,
   };
-  const interest = loanInterest(preview);
-  const totalDue = loanTotalDue(preview);
+  const summary = loanSummary(preview);
+  const hasRepayments = (editing?.repayments?.length ?? 0) > 0;
 
   async function handleSubmit(values: FormValues) {
     const member =
@@ -135,25 +151,38 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
         ? members.find((m) => m.id === values.borrowerId)
         : undefined;
 
-    await upsertLoan({
-      id: editing?.id,
-      borrowerType: values.borrowerType,
-      borrowerId: values.borrowerType === 'member' ? values.borrowerId : undefined,
-      borrowerName:
-        values.borrowerType === 'member'
-          ? member?.name ?? 'Unknown member'
-          : values.borrowerName.trim(),
-      principal: values.principal,
-      interestRate: values.interestRate,
-      issueDate: values.issueDate,
-      dueDate: values.dueDate || undefined,
-      settledDate:
-        values.status === 'active'
-          ? undefined
-          : values.settledDate || today(),
-      status: values.status,
-      notes: values.notes,
-    });
+    setError(null);
+    setBusy(true);
+    try {
+      await upsertLoan({
+        id: editing?.id,
+        borrowerType: values.borrowerType,
+        borrowerId:
+          values.borrowerType === 'member' ? values.borrowerId : undefined,
+        borrowerName:
+          values.borrowerType === 'member'
+            ? member?.name ?? 'Unknown member'
+            : values.borrowerName.trim(),
+        principal: toNumber(values.principal) ?? 0,
+        interestRate: toNumber(values.interestRate) ?? 0,
+        issueDate: values.issueDate,
+        dueDate: values.dueDate || undefined,
+        settledDate:
+          values.status === 'active'
+            ? undefined
+            : values.settledDate || todayISO(),
+        status: values.status,
+        notes: values.notes,
+      });
+    } catch (e) {
+      // Previously a rejected write was swallowed: the modal just sat there
+      // with no feedback. Surface the reason instead.
+      console.error('Saving loan failed:', e);
+      setError(describeSaveError(e));
+      return;
+    } finally {
+      setBusy(false);
+    }
 
     notifications.show({
       title: editing ? 'Loan updated' : 'Loan recorded',
@@ -164,13 +193,13 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
       color: 'teal',
       autoClose: 2000,
     });
-    onClose();
+    close();
   }
 
   return (
     <Modal
       opened={opened}
-      onClose={onClose}
+      onClose={close}
       title={editing ? 'Edit loan' : 'Give out loan'}
       centered
       size="lg"
@@ -182,6 +211,7 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
               label="Borrower type"
               data={BORROWER_TYPE_OPTIONS}
               value={borrowerType}
+              allowDeselect={false}
               onChange={(v) => v && handleTypeChange(v as BorrowerType)}
             />
             {borrowerType === 'member' ? (
@@ -190,6 +220,7 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
                 placeholder="Select member"
                 data={memberOptions}
                 searchable
+                nothingFoundMessage="No matching member"
                 {...form.getInputProps('borrowerId')}
               />
             ) : (
@@ -237,6 +268,7 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
             <Select
               label="Status"
               data={LOAN_STATUS_OPTIONS}
+              allowDeselect={false}
               {...form.getInputProps('status')}
             />
             {closed && (
@@ -257,15 +289,37 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
           >
             <Stack gap={0}>
               <Text size="xs" c="dimmed" tt="uppercase">
-                Interest {status === 'defaulted' ? '(written off)' : 'so far'}
+                Interest {status === 'defaulted' ? '(collected)' : 'so far'}
               </Text>
-              <Text fw={600}>{fmt(interest)}</Text>
+              <Text fw={600}>{fmt(summary.totalInterest)}</Text>
             </Stack>
+            {hasRepayments && (
+              <Stack gap={0} align="center">
+                <Text size="xs" c="dimmed" tt="uppercase">
+                  Repaid
+                </Text>
+                <Text fw={600} className="text-positive">
+                  {fmt(summary.totalRepaid)}
+                </Text>
+              </Stack>
+            )}
             <Stack gap={0} align="flex-end">
               <Text size="xs" c="dimmed" tt="uppercase">
-                Total due
+                {status === 'active'
+                  ? 'Balance due'
+                  : status === 'repaid'
+                    ? 'Total repaid'
+                    : 'Principal lost'}
               </Text>
-              <Text fw={600}>{fmt(totalDue)}</Text>
+              <Text fw={600}>
+                {fmt(
+                  status === 'active'
+                    ? summary.balanceDue
+                    : status === 'repaid'
+                      ? summary.totalRepaid
+                      : summary.principalOutstanding
+                )}
+              </Text>
             </Stack>
           </Group>
 
@@ -277,11 +331,22 @@ export function LoanFormModal({ opened, onClose, editing }: Props) {
             {...form.getInputProps('notes')}
           />
 
+          {error && (
+            <Alert
+              color="red"
+              variant="light"
+              icon={<IconAlertCircle size={16} />}
+              title="Couldn't save the loan"
+            >
+              {error}
+            </Alert>
+          )}
+
           <Group justify="flex-end" mt="xs">
-            <Button variant="default" onClick={onClose}>
+            <Button variant="default" onClick={close} disabled={busy}>
               Cancel
             </Button>
-            <Button type="submit">
+            <Button type="submit" loading={busy}>
               {editing ? 'Save changes' : 'Give loan'}
             </Button>
           </Group>

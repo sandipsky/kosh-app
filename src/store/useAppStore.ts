@@ -1,7 +1,15 @@
 import { create } from 'zustand';
 import { v4 as uuid } from 'uuid';
 import type { Unsubscribe } from 'firebase/firestore';
-import type { AppData, Investment, Loan, Member, Payment } from '../types';
+import type {
+  AppData,
+  Investment,
+  Loan,
+  LoanRepayment,
+  Member,
+  Payment,
+} from '../types';
+import { loanSummary } from '../lib/calculations';
 import { storage } from '../lib/storage';
 import type { Attachment } from '../lib/storage';
 
@@ -31,6 +39,11 @@ interface AppState {
 
   upsertLoan: (loan: Omit<Loan, 'id'> & { id?: string }) => Promise<Loan>;
   deleteLoan: (id: string) => Promise<void>;
+  addLoanRepayment: (
+    loanId: string,
+    repayment: Omit<LoanRepayment, 'id'>
+  ) => Promise<{ settled: boolean }>;
+  deleteLoanRepayment: (loanId: string, repaymentId: string) => Promise<void>;
 
   setCashInBank: (n: number) => Promise<void>;
   setInvestmentRate: (id: string, rate: number) => Promise<void>;
@@ -190,13 +203,49 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async upsertLoan(loan) {
     const id = loan.id ?? uuid();
-    const result: Loan = { ...(loan as Omit<Loan, 'id'>), id };
+    // saveLoan does a full overwrite, and the loan form doesn't edit
+    // repayments — carry over the latest recorded installments so editing a
+    // loan's details never wipes its repayment history.
+    const existing = get().data.loans.find((l) => l.id === id);
+    const result: Loan = {
+      ...(loan as Omit<Loan, 'id'>),
+      id,
+      repayments: loan.repayments ?? existing?.repayments,
+    };
     await withSaving(set, () => storage.saveLoan(result));
     return result;
   },
 
   async deleteLoan(id) {
     await withSaving(set, () => storage.deleteLoan(id));
+  },
+
+  async addLoanRepayment(loanId, input) {
+    const loan = get().data.loans.find((l) => l.id === loanId);
+    if (!loan) throw new Error('Loan not found — it may have been deleted.');
+    const repayment: LoanRepayment = { ...input, id: uuid() };
+    // If this installment clears the balance (within a rupee of rounding),
+    // close the loan as repaid on the payment date.
+    const after = loanSummary({
+      ...loan,
+      repayments: [...(loan.repayments ?? []), repayment],
+    });
+    const settled = loan.status === 'active' && after.balanceDue < 1;
+    await withSaving(set, () =>
+      storage.addLoanRepayment(
+        loanId,
+        repayment,
+        settled ? { status: 'repaid', settledDate: repayment.date } : undefined
+      )
+    );
+    return { settled };
+  },
+
+  async deleteLoanRepayment(loanId, repaymentId) {
+    const loan = get().data.loans.find((l) => l.id === loanId);
+    const target = loan?.repayments?.find((r) => r.id === repaymentId);
+    if (!target) return;
+    await withSaving(set, () => storage.removeLoanRepayment(loanId, target));
   },
 
   async setCashInBank(n) {

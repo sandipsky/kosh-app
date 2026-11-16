@@ -51,6 +51,17 @@ export interface Investment {
 export type BorrowerType = 'member' | 'outside';
 export type LoanStatus = 'active' | 'repaid' | 'defaulted';
 
+/**
+ * A partial repayment (installment) received from the borrower. Each payment
+ * clears accrued interest first, then reduces the outstanding principal.
+ */
+export interface LoanRepayment {
+  id: string;
+  date: string; // ISO 'YYYY-MM-DD'
+  amount: number;
+  note?: string;
+}
+
 export interface Loan {
   id: string;
   borrowerType: BorrowerType;
@@ -69,6 +80,8 @@ export interface Loan {
   settledDate?: string;
   status: LoanStatus;
   notes: string;
+  // Installments received so far. Undefined on loans with no repayments.
+  repayments?: LoanRepayment[];
 }
 
 export interface AppData {

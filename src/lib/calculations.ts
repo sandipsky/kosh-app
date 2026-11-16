@@ -1,4 +1,4 @@
-import type { AppData, Investment, Loan, Member } from '../types';
+import type { AppData, Investment, Loan, LoanRepayment, Member } from '../types';
 import {
   currentMonthLabel,
   KOSH_START_MONTH,
@@ -75,18 +75,131 @@ export function loanDays(loan: Loan, asOf: Date = new Date()): number {
   return Math.max(0, (end - start) / DAY_MS);
 }
 
-/**
- * Simple annual interest: principal × rate% × (days / 365).
- * Defaulted loans earn nothing — the interest is written off with the principal.
- */
-export function loanInterest(loan: Loan, asOf: Date = new Date()): number {
-  if (loan.status === 'defaulted') return 0;
-  return loan.principal * (loan.interestRate / 100) * (loanDays(loan, asOf) / 365);
+export interface LoanLedgerRow {
+  repayment: LoanRepayment;
+  /** Interest that accrued between the previous repayment (or issue) and this one. */
+  interestAccrued: number;
+  toInterest: number;
+  toPrincipal: number;
+  principalAfter: number;
+  /** Outstanding principal + unpaid interest right after this repayment. */
+  balanceAfter: number;
 }
 
-/** Principal + interest accrued so far (or at settlement). */
-export function loanTotalDue(loan: Loan, asOf: Date = new Date()): number {
-  return loan.principal + loanInterest(loan, asOf);
+export interface LoanSummary {
+  /** Recorded repayments in date order, with how each one was applied. */
+  rows: LoanLedgerRow[];
+  /** Cash received back — recorded installments, plus the final settlement for repaid loans. */
+  totalRepaid: number;
+  principalRepaid: number;
+  interestPaid: number;
+  /** Active: principal still owed. Defaulted: principal lost. Repaid: 0. */
+  principalOutstanding: number;
+  /** Interest accrued but not yet paid (active loans only). */
+  interestDue: number;
+  /** What the borrower owes today (active loans only). */
+  balanceDue: number;
+  /** All interest on the loan: paid + accrued-unpaid. */
+  totalInterest: number;
+}
+
+function isoMs(iso: string): number {
+  return new Date(iso).getTime();
+}
+
+function sortedRepayments(loan: Loan): LoanRepayment[] {
+  return [...(loan.repayments ?? [])].sort(
+    (a, b) => isoMs(a.date) - isoMs(b.date)
+  );
+}
+
+/**
+ * Walks a loan's repayments in date order. Simple annual interest accrues
+ * daily on the outstanding principal only (unpaid interest never earns
+ * interest). Each repayment clears accrued interest first, then principal.
+ *
+ * Closed loans stop accruing at their settle date:
+ *  - repaid    → whatever was still owed is treated as paid at settlement
+ *  - defaulted → remaining principal is lost, unpaid interest written off
+ */
+export function loanSummary(loan: Loan, asOf: Date = new Date()): LoanSummary {
+  const rate = (Number(loan.interestRate) || 0) / 100;
+  const principal = Number(loan.principal) || 0;
+  const startMs = isoMs(loan.issueDate);
+  const closed = loan.status !== 'active' && !!loan.settledDate;
+  const endMs = closed ? isoMs(loan.settledDate as string) : asOf.getTime();
+  const valid = !Number.isNaN(startMs) && !Number.isNaN(endMs);
+
+  const accrue = (p: number, fromMs: number, toMs: number) =>
+    valid && toMs > fromMs ? p * rate * ((toMs - fromMs) / DAY_MS / 365) : 0;
+
+  let principalOut = principal;
+  let interestUnpaid = 0;
+  let principalRepaid = 0;
+  let interestPaid = 0;
+  let totalRepaid = 0;
+  let lastMs = startMs;
+  const rows: LoanLedgerRow[] = [];
+
+  for (const r of sortedRepayments(loan)) {
+    // Clamp into [issue, end] so a mis-dated entry still counts as cash
+    // received but never accrues negative or post-settlement interest.
+    const t = Math.min(Math.max(isoMs(r.date) || lastMs, lastMs), endMs);
+    const accrued = accrue(principalOut, lastMs, t);
+    interestUnpaid += accrued;
+    lastMs = Math.max(lastMs, t);
+
+    const amount = Math.max(0, Number(r.amount) || 0);
+    const toInterest = Math.min(amount, interestUnpaid);
+    const toPrincipal = Math.min(amount - toInterest, principalOut);
+    interestUnpaid -= toInterest;
+    principalOut -= toPrincipal;
+    interestPaid += toInterest;
+    principalRepaid += toPrincipal;
+    totalRepaid += toInterest + toPrincipal;
+
+    rows.push({
+      repayment: r,
+      interestAccrued: accrued,
+      toInterest,
+      toPrincipal,
+      principalAfter: principalOut,
+      balanceAfter: principalOut + interestUnpaid,
+    });
+  }
+
+  interestUnpaid += accrue(principalOut, lastMs, endMs);
+
+  if (loan.status === 'repaid') {
+    // Final settlement: the remaining balance was paid off.
+    totalRepaid += principalOut + interestUnpaid;
+    principalRepaid += principalOut;
+    interestPaid += interestUnpaid;
+    principalOut = 0;
+    interestUnpaid = 0;
+  } else if (loan.status === 'defaulted') {
+    interestUnpaid = 0; // written off along with the remaining principal
+  }
+
+  const active = loan.status === 'active';
+  return {
+    rows,
+    totalRepaid,
+    principalRepaid,
+    interestPaid,
+    principalOutstanding: principalOut,
+    interestDue: active ? interestUnpaid : 0,
+    balanceDue: active ? principalOut + interestUnpaid : 0,
+    totalInterest: interestPaid + (active ? interestUnpaid : 0),
+  };
+}
+
+/**
+ * All interest on a loan: paid so far plus accrued-unpaid. For a defaulted
+ * loan only the interest actually collected before the default counts.
+ */
+export function loanInterest(loan: Loan, asOf: Date = new Date()): number {
+  return loanSummary(loan, asOf).totalInterest;
 }
 
 export function activeLoans(data: AppData): Loan[] {
@@ -95,29 +208,117 @@ export function activeLoans(data: AppData): Loan[] {
 
 /** Principal currently lent out and not yet repaid (active loans). */
 export function loansOutstandingPrincipal(data: AppData): number {
-  return activeLoans(data).reduce((s, l) => s + l.principal, 0);
+  return activeLoans(data).reduce(
+    (s, l) => s + loanSummary(l).principalOutstanding,
+    0
+  );
 }
 
 /** Principal lost to defaults — money that will never come back. */
 export function loansDefaultedPrincipal(data: AppData): number {
   return data.loans
     .filter((l) => l.status === 'defaulted')
-    .reduce((s, l) => s + l.principal, 0);
+    .reduce((s, l) => s + loanSummary(l).principalOutstanding, 0);
 }
 
-/** Realized interest income from loans that have been fully repaid. */
+/**
+ * Realized interest income: interest collected on every loan — installments
+ * on active loans, interest paid before a default, and everything on repaid
+ * loans.
+ */
 export function loansInterestEarned(data: AppData): number {
-  return data.loans
-    .filter((l) => l.status === 'repaid')
-    .reduce((s, l) => s + loanInterest(l), 0);
+  return data.loans.reduce((s, l) => s + loanSummary(l).interestPaid, 0);
 }
 
 /**
  * Value of active loans as a fund asset: outstanding principal plus the
- * interest accrued on it to date.
+ * unpaid interest accrued on it to date.
  */
 export function loansReceivable(data: AppData): number {
-  return activeLoans(data).reduce((s, l) => s + loanTotalDue(l), 0);
+  return activeLoans(data).reduce((s, l) => s + loanSummary(l).balanceDue, 0);
+}
+
+// ----- Monthly repayment plan ---------------------------------------------
+
+export interface InstallmentRow {
+  month: number;
+  payment: number;
+  interest: number;
+  principal: number;
+  /** Principal + carried interest still owed after this installment. */
+  balance: number;
+}
+
+/**
+ * Simulates `months` equal monthly payments using the same rules as the loan
+ * ledger: interest accrues on principal only (annual rate / 12 per month) and
+ * each payment clears unpaid interest before principal. `interestDue` is
+ * interest already accrued but unpaid — it is carried without earning interest.
+ */
+function simulatePlan(
+  principal: number,
+  interestDue: number,
+  annualRatePct: number,
+  months: number,
+  payment: number
+): { rows: InstallmentRow[]; residual: number } {
+  const r = annualRatePct / 100 / 12;
+  let p = principal;
+  let u = interestDue;
+  const rows: InstallmentRow[] = [];
+  for (let m = 1; m <= months; m++) {
+    const accrued = p * r;
+    u += accrued;
+    // The final installment clears whatever is left exactly.
+    const pay = m === months ? Math.max(0, p + u) : payment;
+    const toInterest = Math.min(pay, u);
+    const toPrincipal = Math.min(pay - toInterest, p);
+    u -= toInterest;
+    p -= toPrincipal;
+    rows.push({
+      month: m,
+      payment: toInterest + toPrincipal,
+      interest: accrued,
+      principal: toPrincipal,
+      balance: p + u,
+    });
+  }
+  return { rows, residual: p + u };
+}
+
+/**
+ * Equal monthly installment needed to clear `principal` + `interestDue` in
+ * `months` payments, with the full schedule. With nothing carried this is the
+ * standard EMI formula; a binary search keeps it exact when there is
+ * carried interest.
+ */
+export function installmentPlan(
+  principal: number,
+  interestDue: number,
+  annualRatePct: number,
+  months: number
+): { payment: number; rows: InstallmentRow[]; totalInterest: number } {
+  const n = Math.floor(months);
+  const p = Math.max(0, principal);
+  const u = Math.max(0, interestDue);
+  if (n <= 0 || p + u <= 0) return { payment: 0, rows: [], totalInterest: 0 };
+
+  const r = Math.max(0, annualRatePct) / 100 / 12;
+  let lo = 0;
+  // Paying everything plus a full term of interest in month one always clears it.
+  let hi = p + u + p * r * n + 1;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    const { rows } = simulatePlan(p, u, annualRatePct, n, mid);
+    // Compare the forced final payment against the regular one.
+    const last = rows[rows.length - 1]?.payment ?? 0;
+    if (last > mid) lo = mid;
+    else hi = mid;
+  }
+  const payment = hi;
+  const { rows } = simulatePlan(p, u, annualRatePct, n, payment);
+  const totalPaid = rows.reduce((s, row) => s + row.payment, 0);
+  return { payment, rows, totalInterest: totalPaid - p };
 }
 
 // -------------------------------------------------------------------------

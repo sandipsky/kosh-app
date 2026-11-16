@@ -19,6 +19,8 @@ import {
 import { fmt } from '../../lib/formatters';
 import { useAppStore } from '../../store/useAppStore';
 import { LoanCard } from './LoanCard';
+import { LoanDetailsModal } from './LoanDetailsModal';
+import type { LoanDetailsTab } from './LoanDetailsModal';
 import { LoanFormModal } from './LoanFormModal';
 import type { Loan } from '../../types';
 
@@ -37,6 +39,14 @@ export function LoansList() {
 
   const [opened, setOpened] = useState(false);
   const [editing, setEditing] = useState<Loan | null>(null);
+  // Track the loan by id so the details modal always shows the live doc
+  // (e.g. right after a repayment syncs back from Firestore).
+  const [details, setDetails] = useState<{ id: string; tab: LoanDetailsTab } | null>(
+    null
+  );
+  const detailsLoan = details
+    ? data.loans.find((l) => l.id === details.id) ?? null
+    : null;
 
   const loans = useMemo(
     () =>
@@ -137,6 +147,7 @@ export function LoansList() {
               loan={l}
               onEdit={openEdit}
               onDelete={confirmDelete}
+              onOpenDetails={(loan, tab) => setDetails({ id: loan.id, tab })}
             />
           ))}
         </SimpleGrid>
@@ -146,6 +157,12 @@ export function LoansList() {
         opened={opened}
         onClose={() => setOpened(false)}
         editing={editing}
+      />
+      <LoanDetailsModal
+        loan={detailsLoan}
+        tab={details?.tab ?? 'repayments'}
+        onTabChange={(tab) => setDetails((d) => (d ? { ...d, tab } : d))}
+        onClose={() => setDetails(null)}
       />
     </Stack>
   );
