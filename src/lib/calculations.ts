@@ -370,29 +370,22 @@ export function uniqueMonths(data: AppData): string[] {
 }
 
 export function pendingDues(data: AppData): number {
-  const months = allKoshMonths();
-  const contribMembers = data.members.filter(isContributingMember);
-  let due = 0;
-  for (const m of contribMembers) {
-    for (const month of months) {
-      const exists = data.payments.find(
-        (p) => p.memberId === m.id && p.month === month
-      );
-      if (!exists) due += data.monthlyContribution;
-    }
-  }
-  return due;
+  return data.members
+    .filter(isContributingMember)
+    .reduce((s, m) => s + memberDue(data, m.id), 0);
 }
 
+/**
+ * What a member still owes: the contribution expected for every kosh month so
+ * far, minus everything they've actually paid. Based on amounts rather than
+ * which months have a payment record, so a lump-sum catch-up (e.g. Rs 18,000
+ * recorded against one month to cover nine) clears the earlier months too.
+ */
 export function memberDue(data: AppData, memberId: string): number {
   const member = data.members.find((m) => m.id === memberId);
   if (!member || !isContributingMember(member)) return 0;
-  const months = allKoshMonths();
-  const paid = data.payments
-    .filter((p) => p.memberId === memberId)
-    .map((p) => p.month);
-  const pending = months.filter((mo) => !paid.includes(mo)).length;
-  return pending * data.monthlyContribution;
+  const expected = allKoshMonths().length * data.monthlyContribution;
+  return Math.max(0, expected - memberTotal(data, memberId));
 }
 
 export type MemberStatus = 'cleared' | 'behind';
